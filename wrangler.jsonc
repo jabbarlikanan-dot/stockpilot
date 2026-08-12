@@ -1,8 +1,22 @@
 {
   "name": "stockpilot-auth",
-  "main": "src/worker.js",
+  "main": "worker.js",
   "compatibility_date": "2026-08-12",
-  "assets": { "directory": "public", "binding": "ASSETS" },
-  "d1_databases": [{ "binding": "DB", "database_name": "stockpilot-db", "database_id": "REPLACE_WITH_D1_DATABASE_ID" }],
-  "r2_buckets": [{ "binding": "IMAGES", "bucket_name": "stockpilot-images" }]
+  "assets": {
+    "directory": ".",
+    "binding": "ASSETS"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "stockpilot-db",
+      "database_id": "ccfae471-04b5-4b0b-aa0e-029905ac562e"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "IMAGES",
+      "bucket_name": "stockpilot-images"
+    }
+  ]
 }
