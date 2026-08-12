@@ -19,3 +19,4 @@ Bu paket **static upload üçün deyil**. Fərdi hesabların, şifrələrin, sif
 - Sifariş, məhsul, foto və statistika həmin userə məxsusdur.
 - İstənilən cihazdan eyni username və 4 rəqəmli şifrə ilə giriş etmək olur.
 - “Satıldı et” seçimi satış tarixini saxlayır; statistika gün/həftə/ay/il üzrə bu məlumatlardan hesablanır.
+<!-- build trigger -->
