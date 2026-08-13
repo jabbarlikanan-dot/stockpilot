@@ -1,4 +1,4 @@
-/* Sifarişlər, ölkə tarifləri və Excel ixracı */
+/* Sifarişlər, karqo tarifləri, filter və Excel ixracı */
 const defaults = {
   america: {
     name: "Amerika",
@@ -24,34 +24,44 @@ let state = window.__stockState || {
   orders: [],
   countries: defaults,
 };
+state.countries = { ...defaults, ...(state.countries || {}) };
+state.ui = {
+  search: "",
+  status: "all",
+  orderSort: "newest",
+  lastSavedAt: null,
+  ...(state.ui || {}),
+};
 let pendingImage = "",
-  editing = null;
-const $ = (id) => document.getElementById(id),
-  money = (n) =>
-    (Number(n) || 0).toLocaleString("az-AZ", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }),
-  esc = (s) =>
-    String(s || "").replace(
-      /[&<>"']/g,
-      (m) =>
-        ({
-          "&": "&amp;",
-          "<": "&lt;",
-          ">": "&gt;",
-          '"': "&quot;",
-          "'": "&#039;",
-        })[m],
-    );
-const save = () => window.persistStockState(state);
+  editing = null,
+  lastDeleted = null;
+const $ = (id) => document.getElementById(id);
+const money = (n) =>
+  (Number(n) || 0).toLocaleString("az-AZ", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+const esc = (s) =>
+  String(s || "").replace(
+    /[&<>"']/g,
+    (m) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#039;",
+      })[m],
+  );
+const save = () => {
+  state.ui.lastSavedAt = new Date().toISOString();
+  window.persistStockState(state);
+};
 const active = () => state.orders.find((o) => o.id === state.active);
-function country(k) {
-  return state.countries[k] || state.countries.america;
-}
-function shipping(g, k) {
+const country = (k) => state.countries[k] || state.countries.america;
+const shipping = (g, k) => {
   g = +g || 0;
-  let a = country(k).tariffs;
+  const a = country(k).tariffs;
   return !g
     ? 0
     : g <= 100
@@ -61,10 +71,9 @@ function shipping(g, k) {
         : g <= 500
           ? a[2]
           : Math.ceil(g / 1000) * a[3];
-}
-function range(g) {
-  g = +g || 0;
-  return g <= 100
+};
+const range = (g) =>
+  g <= 100
     ? "0–100 qr"
     : g <= 250
       ? "101–250 qr"
@@ -72,23 +81,16 @@ function range(g) {
         ? "251–500 qr"
         : g <= 1000
           ? "501 qr–1 kq"
-          : Math.ceil(g / 1000) + " kq";
-}
-function newOrder() {
-  let o = {
-    id: Date.now().toString(),
-    name: "Sifariş " + (state.orders.length + 1),
-    budget: 0,
-    createdAt: new Date().toISOString(),
-    items: [],
-  };
-  state.orders.push(o);
-  state.active = o.id;
-  save();
-  render();
-}
+          : `${Math.ceil(g / 1000)} kq`;
+const dateTime = (v) =>
+  v
+    ? new Intl.DateTimeFormat("az-AZ", {
+        dateStyle: "short",
+        timeStyle: "short",
+      }).format(new Date(v))
+    : "—";
 function calc(i) {
-  let c = country(i.country),
+  const c = country(i.country),
     q = +i.qty || 0,
     ship = shipping(i.weight, i.country),
     purchase = ((+i.price || 0) * q + ship) * c.rate,
@@ -103,9 +105,9 @@ function calc(i) {
   };
 }
 function totals(o) {
-  return o.items.reduce(
+  return (o.items || []).reduce(
     (a, i) => {
-      let x = calc(i);
+      const x = calc(i);
       a.purchase += x.purchase;
       a.items += +i.qty || 0;
       if (i.sold) {
@@ -121,26 +123,41 @@ function totals(o) {
 function allTotals() {
   return state.orders.reduce(
     (a, o) => {
-      let t = totals(o);
-      for (let k in a) a[k] += t[k];
+      const t = totals(o);
+      Object.keys(a).forEach((k) => (a[k] += t[k]));
       return a;
     },
     { purchase: 0, sales: 0, profit: 0, items: 0, sold: 0 },
   );
 }
-function dateTime(v) {
-  return new Intl.DateTimeFormat("az-AZ", {
-    dateStyle: "short",
-    timeStyle: "short",
-  }).format(new Date(v));
+function newOrder() {
+  const o = {
+    id: Date.now().toString(),
+    name: `Sifariş ${state.orders.length + 1}`,
+    budget: 0,
+    note: "",
+    createdAt: new Date().toISOString(),
+    items: [],
+  };
+  state.orders.push(o);
+  state.active = o.id;
+  save();
+  render();
+}
+function sortedOrders() {
+  return [...state.orders].sort((a, b) =>
+    state.ui.orderSort === "oldest"
+      ? new Date(a.createdAt) - new Date(b.createdAt)
+      : new Date(b.createdAt) - new Date(a.createdAt),
+  );
 }
 function compactImage(file) {
   return new Promise((ok, no) => {
-    let r = new FileReader();
+    const r = new FileReader();
     r.onload = () => {
-      let im = new Image();
+      const im = new Image();
       im.onload = () => {
-        let c = document.createElement("canvas"),
+        const c = document.createElement("canvas"),
           z = Math.min(1, 180 / Math.max(im.width, im.height));
         c.width = im.width * z;
         c.height = im.height * z;
@@ -155,7 +172,7 @@ function compactImage(file) {
 }
 function tabs() {
   $("tabs").innerHTML =
-    state.orders
+    sortedOrders()
       .map(
         (o) =>
           `<button class="tab ${o.id === state.active ? "active" : ""}" data-id="${o.id}">${esc(o.name)}</button>`,
@@ -180,49 +197,102 @@ function countryOptions(selected) {
     )
     .join("");
 }
+function visibleItems(o) {
+  const q = state.ui.search.trim().toLocaleLowerCase("az"),
+    status = state.ui.status;
+  return (o.items || [])
+    .map((item, index) => ({ item, index }))
+    .filter(
+      ({ item }) =>
+        (!q ||
+          `${item.name} ${item.category || ""}`
+            .toLocaleLowerCase("az")
+            .includes(q)) &&
+        (status === "all" || (status === "sold" ? item.sold : !item.sold)),
+    );
+}
+function undoBox() {
+  const box = $("undoToast");
+  if (!box) return;
+  if (!lastDeleted) {
+    box.classList.add("hidden");
+    return;
+  }
+  box.innerHTML = `<span>Son silinən məhsul: <b>${esc(lastDeleted.item.name)}</b></span><button id="undoDelete" class="secondary">Geri qaytar</button>`;
+  box.classList.remove("hidden");
+  $("undoDelete").onclick = () => {
+    const o = state.orders.find((x) => x.id === lastDeleted.orderId);
+    if (o) {
+      o.items.splice(lastDeleted.index, 0, lastDeleted.item);
+      save();
+    }
+    lastDeleted = null;
+    render();
+  };
+}
 function render() {
   if (!state.orders.length) return newOrder();
   tabs();
-  let o = active(),
-    e = Number.isInteger(editing) ? o.items[editing] : null;
+  const o = active();
+  if (!o) {
+    state.active = state.orders[0].id;
+    return render();
+  }
+  const e = Number.isInteger(editing) ? o.items[editing] : null;
   if (!e) editing = null;
   if (e) pendingImage = e.img || "";
-  let t = totals(o),
-    remain = (+o.budget || 0) - t.purchase + t.sales;
+  const t = totals(o),
+    remain = (+o.budget || 0) - t.purchase + t.sales,
+    spent = Math.max(0, t.purchase - t.sales),
+    used = o.budget ? Math.min(100, (spent / +o.budget) * 100) : 0,
+    today = new Date().toDateString(),
+    todaySold = (o.items || []).filter(
+      (i) => i.sold && i.soldAt && new Date(i.soldAt).toDateString() === today,
+    ),
+    todayValue = todaySold.reduce((s, i) => s + calc(i).sales, 0),
+    rows = visibleItems(o);
   $("content").innerHTML =
-    `<section class="box orderbar"><div class="field name"><label>Sifarişin adı</label><input id="orderName" value="${esc(o.name)}"></div><div class="field"><label>Yaradılma tarixi</label><input readonly value="${dateTime(o.createdAt)}"></div><div class="field"><label>Büdcə (₼)</label><input id="budget" type="number" min="0" value="${o.budget}"></div><div class="field"><label>Qeyd</label><input value="3 ölkə üzrə tarif" readonly></div><button id="deleteOrder" class="danger">Sifarişi sil</button></section>
-  <section class="workspace"><aside class="box form"><h2>${e ? "Məhsulu redaktə et" : "Məhsul əlavə et"}</h2><div class="grid"><div class="field wide"><label>Məhsulun adı</label><input id="name" value="${e ? esc(e.name) : ""}" placeholder="Məsələn: Kreatin"></div><div class="field"><label>Ölkə</label><select id="productCountry">${countryOptions(e ? e.country : "america")}</select></div><div class="field"><label>Say</label><input id="qty" type="number" min="1" value="${e ? e.qty : 1}"></div><div class="field"><label>Alış qiyməti</label><input id="price" type="number" min="0" step=".01" value="${e ? e.price : 0}"></div><div class="field"><label>Satış qiyməti (₼)</label><input id="sale" type="number" min="0" step=".01" value="${e ? e.sale : 0}"></div><div class="field wide"><label>Çəki (qram, ümumi)</label><input id="weight" type="number" min="0" value="${e ? e.weight : 0}"></div><div class="field wide"><label>Məhsul şəkli</label><input id="image" class="file" type="file" accept="image/png,image/jpeg,image/webp">${e && pendingImage ? '<button id="deleteImage" class="remove" style="margin:8px 0 0">Şəkli sil</button>' : ""}</div></div><p class="hint">Seçilən ölkənin tarifi və məzənnəsi avtomatik tətbiq olunur.</p><button id="saveItem" class="primary save">${e ? "Dəyişiklikləri yadda saxla" : "Listə əlavə et"}</button>${e ? '<button id="cancelEdit" class="secondary save">Ləğv et</button>' : ""}</aside>
-  <section class="box tablebox"><div class="scroll"><table class="items"><thead><tr><th>Şəkil</th><th>Məhsul</th><th>Ölkə</th><th>Say</th><th>Alış</th><th>Karqo</th><th>Ümumi alış</th><th>Satış</th><th>Qazanc</th><th>Faiz</th><th>Status</th><th>Əməliyyat</th></tr></thead><tbody>${
-    o.items.length
-      ? o.items
-          .map((i, n) => {
-            let x = calc(i),
-              im = i.img
-                ? `<img class="thumb" src="${i.img}">`
-                : '<div class="noimg">Şəkil<br>yoxdur</div>';
-            return `<tr><td>${im}</td><td><b>${esc(i.name)}</b></td><td>${x.c.name}</td><td class="num">${i.qty}</td><td class="num">${money((+i.price || 0) * (+i.qty || 0) * x.c.rate)} ₼</td><td class="num">${money(x.ship * x.c.rate)} ₼<br><small>${range(i.weight)}</small></td><td class="num">${money(x.purchase)} ₼</td><td class="num">${money(x.sales)} ₼</td><td class="num lime">${money(x.profit)} ₼</td><td class="num">${(x.pct * 100).toFixed(1)}%</td><td><button class="sold" data-sold="${n}">${i.sold ? "Satılıb" : "Satıldı et"}</button></td><td><button class="edit" data-edit="${n}">Redaktə</button><button class="remove" data-remove="${n}">Sil</button></td></tr>`;
-          })
-          .join("")
-      : '<tr><td colspan="12" class="empty">Hələ məhsul əlavə edilməyib.<br><small>Soldakı formdan ilk məhsulunu əlavə et.</small></td></tr>'
-  }</tbody></table></div></section></section>
-  <section class="metrics"><div class="box metric"><span>Ümumi alış</span><strong>${money(t.purchase)} ₼</strong></div><div class="box metric"><span>Satışdan daxil olan</span><strong>${money(t.sales)} ₼</strong></div><div class="box metric"><span>Satış qazancı</span><strong class="lime">${money(t.profit)} ₼</strong></div><div class="box metric"><span>Büdcədə qalan</span><strong class="lime">${money(remain)} ₼</strong></div></section><section class="box tariff-box"><h2>Aktiv karqo tarifləri</h2><div class="tariff-list">${Object.values(
-    state.countries,
-  )
-    .map(
-      (c) =>
-        `<div><b>${c.name}</b>0–100 qr: ${c.tariffs[0]} ${c.currency}<br>501 qr–1 kq: ${c.tariffs[3]} ${c.currency}</div>`,
-    )
-    .join("")}</div></section>`;
+    `<section class="box orderbar"><div class="field name"><label>Sifarişin adı</label><input id="orderName" value="${esc(o.name)}"></div><div class="field"><label>Yaradılma tarixi</label><input readonly value="${dateTime(o.createdAt)}"></div><div class="field"><label>Büdcə (₼)</label><input id="budget" type="number" min="0" value="${o.budget || 0}"></div><div class="field"><label>Qısa qeyd</label><input id="orderNote" maxlength="80" value="${esc(o.note || "")}" placeholder="Məsələn: Avqust malları"></div><button id="deleteOrder" class="danger">Sifarişi sil</button></section><section class="box tools"><input id="search" value="${esc(state.ui.search)}" placeholder="Məhsul adında axtarış…"><select id="statusFilter"><option value="all">Bütün məhsullar</option><option value="sold" ${state.ui.status === "sold" ? "selected" : ""}>Satılanlar</option><option value="unsold" ${state.ui.status === "unsold" ? "selected" : ""}>Satılmayanlar</option></select><select id="orderSort"><option value="newest">Yeni sifarişlər əvvəl</option><option value="oldest" ${state.ui.orderSort === "oldest" ? "selected" : ""}>Köhnə sifarişlər əvvəl</option></select><small>Son yadda saxlanma: ${dateTime(state.ui.lastSavedAt)}</small></section><section class="workspace"><aside class="box form"><h2>${e ? "Məhsulu redaktə et" : "Məhsul əlavə et"}</h2><div class="grid"><div class="field wide"><label>Məhsulun adı</label><input id="name" value="${e ? esc(e.name) : ""}" placeholder="Məsələn: Kreatin"></div><div class="field"><label>Kateqoriya</label><select id="category">${["Əlavələr", "Geyim", "Elektronika", "Kosmetika", "Ev və digər"].map((v) => `<option ${e?.category === v ? "selected" : ""}>${v}</option>`).join("")}</select></div><div class="field"><label>Ölkə</label><select id="productCountry">${countryOptions(e ? e.country : "america")}</select></div><div class="field"><label>Say</label><div class="qty-control"><button type="button" id="qtyMinus">−</button><input id="qty" type="number" min="1" value="${e ? e.qty : 1}"><button type="button" id="qtyPlus">+</button></div></div><div class="field"><label>Alış qiyməti</label><input id="price" type="number" min="0" step=".01" value="${e ? e.price : 0}"></div><div class="field"><label>Satış qiyməti (₼)</label><input id="sale" type="number" min="0" step=".01" value="${e ? e.sale : 0}"></div><div class="field wide"><label>Çəki (qram, ümumi)</label><input id="weight" type="number" min="0" value="${e ? e.weight : 0}"></div><div class="field wide"><label>Məhsul şəkli</label><input id="image" class="file" type="file" accept="image/png,image/jpeg,image/webp">${e && pendingImage ? '<button id="deleteImage" class="remove" style="margin-top:8px">Şəkli sil</button>' : ""}</div></div><p class="hint">Seçilən ölkənin tarifi və məzənnəsi avtomatik tətbiq olunur.</p><button id="saveItem" class="primary save">${e ? "Dəyişiklikləri yadda saxla" : "Listə əlavə et"}</button>${e ? '<button id="cancelEdit" class="secondary save">Ləğv et</button>' : ""}</aside><section class="box tablebox"><div class="scroll"><table class="items"><thead><tr><th>Şəkil</th><th>Məhsul / kateqoriya</th><th>Ölkə</th><th>Say</th><th>Alış</th><th>Karqo</th><th>Ümumi alış</th><th>Satış</th><th>Qazanc</th><th>Faiz</th><th>Status</th><th>Əməliyyat</th></tr></thead><tbody>${
+      rows.length
+        ? rows
+            .map(({ item: i, index: n }) => {
+              const x = calc(i),
+                im = i.img
+                  ? `<img class="thumb" src="${i.img}">`
+                  : '<div class="noimg">Şəkil<br>yoxdur</div>';
+              return `<tr><td>${im}</td><td><b>${esc(i.name)}</b><small class="category">${esc(i.category || "Digər")}</small></td><td>${x.c.name}</td><td class="num">${i.qty}</td><td class="num">${money((+i.price || 0) * (+i.qty || 0) * x.c.rate)} ₼</td><td class="num">${money(x.ship * x.c.rate)} ₼<br><small>${range(i.weight)}</small></td><td class="num">${money(x.purchase)} ₼</td><td class="num">${money(x.sales)} ₼</td><td class="num lime">${money(x.profit)} ₼</td><td class="num">${(x.pct * 100).toFixed(1)}%</td><td><button class="sold" data-sold="${n}">${i.sold ? `Satılıb<br><small>${dateTime(i.soldAt)}</small>` : "Satıldı et"}</button></td><td><button class="edit" data-edit="${n}">Redaktə</button><button class="remove" data-remove="${n}">Sil</button></td></tr>`;
+            })
+            .join("")
+        : '<tr><td colspan="12" class="empty">Bu filterdə məhsul yoxdur.</td></tr>'
+    }</tbody></table></div></section></section><section class="metrics"><div class="box metric"><span>Ümumi alış</span><strong>${money(t.purchase)} ₼</strong></div><div class="box metric"><span>Bu gün satılanlar</span><strong>${todaySold.reduce((s, i) => s + (+i.qty || 0), 0)} ədəd</strong><small>${money(todayValue)} ₼ satış</small></div><div class="box metric"><span>Satış qazancı</span><strong class="lime">${money(t.profit)} ₼</strong></div><div class="box metric budget-card"><span>Büdcə: xərcləndi / qaldı</span><strong>${money(spent)} ₼ / ${money(Math.max(0, remain))} ₼</strong><div class="progress"><i style="width:${used}%"></i></div><small>${used.toFixed(1)}% xərclənib</small></div></section>`;
   bind(o, e);
+  undoBox();
 }
 function bind(o, e) {
-  $("orderName").oninput = (v) => {
+  $("orderName").onchange = (v) => {
     o.name = v.target.value || "Adsız sifariş";
     save();
     tabs();
   };
-  $("budget").oninput = (v) => {
+  $("orderNote").onchange = (v) => {
+    o.note = v.target.value;
+    save();
+  };
+  $("budget").onchange = (v) => {
     o.budget = +v.target.value || 0;
+    save();
+    render();
+  };
+  $("search").oninput = (v) => {
+    state.ui.search = v.target.value;
+    render();
+  };
+  $("statusFilter").onchange = (v) => {
+    state.ui.status = v.target.value;
+    render();
+  };
+  $("orderSort").onchange = (v) => {
+    state.ui.orderSort = v.target.value;
     save();
     render();
   };
@@ -234,8 +304,11 @@ function bind(o, e) {
       render();
     }
   };
-  $("image").onchange = async (e) => {
-    if (e.target.files[0]) pendingImage = await compactImage(e.target.files[0]);
+  $("qtyMinus").onclick = () =>
+    ($("qty").value = Math.max(1, (+$("qty").value || 1) - 1));
+  $("qtyPlus").onclick = () => ($("qty").value = (+$("qty").value || 0) + 1);
+  $("image").onchange = async (v) => {
+    if (v.target.files[0]) pendingImage = await compactImage(v.target.files[0]);
   };
   if ($("deleteImage"))
     $("deleteImage").onclick = () => {
@@ -249,8 +322,9 @@ function bind(o, e) {
       render();
     };
   $("saveItem").onclick = () => {
-    let i = {
+    const i = {
       name: $("name").value.trim(),
+      category: $("category").value,
       country: $("productCountry").value,
       qty: +$("qty").value || 0,
       price: +$("price").value || 0,
@@ -258,6 +332,7 @@ function bind(o, e) {
       weight: +$("weight").value || 0,
       img: pendingImage,
       sold: e ? e.sold : false,
+      soldAt: e?.soldAt || null,
     };
     if (!i.name || !i.qty) return alert("Məhsulun adını və sayını yazın.");
     if (e) o.items[editing] = i;
@@ -277,7 +352,9 @@ function bind(o, e) {
   document.querySelectorAll("[data-remove]").forEach(
     (b) =>
       (b.onclick = () => {
-        o.items.splice(+b.dataset.remove, 1);
+        const index = +b.dataset.remove;
+        lastDeleted = { orderId: o.id, index, item: o.items[index] };
+        o.items.splice(index, 1);
         save();
         render();
       }),
@@ -285,9 +362,9 @@ function bind(o, e) {
   document.querySelectorAll("[data-sold]").forEach(
     (b) =>
       (b.onclick = () => {
-        let item = o.items[+b.dataset.sold];
-        item.sold = !item.sold;
-        item.soldAt = item.sold ? new Date().toISOString() : null;
+        const i = o.items[+b.dataset.sold];
+        i.sold = !i.sold;
+        i.soldAt = i.sold ? new Date().toISOString() : null;
         save();
         render();
       }),
@@ -302,7 +379,7 @@ function hideModal() {
   $("modal").classList.add("hidden");
 }
 function tariffSettings() {
-  let rows = Object.entries(state.countries)
+  const rows = Object.entries(state.countries)
     .map(
       ([k, c]) =>
         `<div class="country-editor"><b>${c.name} (${c.currency})</b>${c.tariffs.map((v, n) => `<input data-country="${k}" data-tariff="${n}" type="number" step=".01" value="${v}">`).join("")}<input data-rate="${k}" type="number" step=".01" value="${c.rate}" title="AZN məzənnəsi"></div>`,
@@ -330,11 +407,12 @@ function tariffSettings() {
 }
 function exportExcel() {
   if (!window.XLSX) return alert("Excel modulu yüklənmədi.");
-  let wb = XLSX.utils.book_new();
+  const wb = XLSX.utils.book_new();
   state.orders.forEach((o, n) => {
-    let rows = [
+    const rows = [
       [
         "Məhsul",
+        "Kateqoriya",
         "Ölkə",
         "Say",
         "Alış (₼)",
@@ -344,12 +422,14 @@ function exportExcel() {
         "Qazanc",
         "Faiz",
         "Status",
+        "Satış tarixi",
       ],
     ];
     o.items.forEach((i) => {
-      let x = calc(i);
+      const x = calc(i);
       rows.push([
         i.name,
+        i.category || "Digər",
         x.c.name,
         i.qty,
         (+i.price || 0) * (+i.qty || 0) * x.c.rate,
@@ -359,28 +439,160 @@ function exportExcel() {
         x.profit,
         x.pct,
         i.sold ? "Satılıb" : "Satılmayıb",
+        i.soldAt ? dateTime(i.soldAt) : "",
       ]);
     });
-    let ws = XLSX.utils.aoa_to_sheet(rows);
+    const ws = XLSX.utils.aoa_to_sheet(rows);
     ws["!cols"] = [
-      { wch: 30 },
+      { wch: 28 },
+      { wch: 16 },
       { wch: 13 },
       { wch: 8 },
-      { wch: 15 },
-      { wch: 15 },
-      { wch: 17 },
-      { wch: 15 },
-      { wch: 15 },
+      { wch: 14 },
+      { wch: 14 },
+      { wch: 16 },
+      { wch: 14 },
+      { wch: 14 },
       { wch: 11 },
       { wch: 14 },
+      { wch: 18 },
     ];
     XLSX.utils.book_append_sheet(
       wb,
       ws,
-      (o.name || "Sifariş " + (n + 1)).slice(0, 31),
+      (o.name || `Sifariş ${n + 1}`).slice(0, 31),
     );
   });
   XLSX.writeFile(wb, "stockpilot-hesabat.xlsx");
+}
+function normalizeHeader(value) {
+  return String(value || "")
+    .trim()
+    .toLocaleLowerCase("az")
+    .replace(/ə/g, "e")
+    .replace(/[ğ]/g, "g")
+    .replace(/[ı]/g, "i")
+    .replace(/[ö]/g, "o")
+    .replace(/[ş]/g, "s")
+    .replace(/[ü]/g, "u")
+    .replace(/[^a-z0-9]/g, "");
+}
+function readImportValue(row, aliases) {
+  const entry = Object.entries(row).find(([key]) =>
+    aliases.includes(normalizeHeader(key)),
+  );
+  return entry ? entry[1] : "";
+}
+function importCountry(value) {
+  const key = normalizeHeader(value);
+  if (["turkiye", "turkey", "tr"].includes(key)) return "turkey";
+  if (["ispaniya", "spain", "es"].includes(key)) return "spain";
+  return "america";
+}
+function importSold(value) {
+  return ["satilib", "satildi", "beli", "yes", "true", "1"].includes(
+    normalizeHeader(value),
+  );
+}
+function importItems(file) {
+  if (!window.XLSX) return alert("Excel modulu yüklənmədi.");
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = (event) => {
+    try {
+      const book = XLSX.read(event.target.result, { type: "array" });
+      const sheet = book.Sheets[book.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+      const o = active();
+      const items = rows
+        .map((row) => {
+          const name = String(
+            readImportValue(row, ["mehsul", "mehsulunadi", "product", "name"]),
+          ).trim();
+          const qty =
+            Number(readImportValue(row, ["say", "qty", "quantity"])) || 0;
+          const sold = importSold(
+            readImportValue(row, ["status", "satilib", "sold"]),
+          );
+          return {
+            name,
+            qty,
+            category:
+              String(readImportValue(row, ["kateqoriya", "category"])).trim() ||
+              "Ev və digər",
+            country: importCountry(readImportValue(row, ["olke", "country"])),
+            price:
+              Number(
+                readImportValue(row, [
+                  "alisqiymeti",
+                  "alis",
+                  "price",
+                  "purchaseprice",
+                ]),
+              ) || 0,
+            sale:
+              Number(
+                readImportValue(row, [
+                  "satisqiymeti",
+                  "satis",
+                  "sale",
+                  "salesprice",
+                ]),
+              ) || 0,
+            weight:
+              Number(
+                readImportValue(row, ["ceki", "weight", "gram", "grams"]),
+              ) || 0,
+            img: "",
+            sold,
+            soldAt: sold ? new Date().toISOString() : null,
+          };
+        })
+        .filter((item) => item.name && item.qty > 0);
+      if (!items.length) {
+        return alert(
+          "Oxunan məhsul tapılmadı. Başlıqlar: Məhsul, Say, Alış qiyməti, Satış qiyməti, Çəki, Ölkə, Kateqoriya, Status.",
+        );
+      }
+      o.items.push(...items);
+      save();
+      render();
+      alert(`${items.length} məhsul aktiv sifarişə əlavə edildi.`);
+    } catch (error) {
+      alert("Excel faylı oxunmadı. Faylın formatını yoxlayın.");
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+function downloadImportTemplate() {
+  if (!window.XLSX) return alert("Excel modulu yüklənmədi.");
+  const rows = [
+    [
+      "Məhsul",
+      "Say",
+      "Alış qiyməti",
+      "Satış qiyməti",
+      "Çəki",
+      "Ölkə",
+      "Kateqoriya",
+      "Status",
+    ],
+    ["Kreatin", 2, 27, 120, 360, "Amerika", "Əlavələr", "Satılmayıb"],
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws["!cols"] = [
+    { wch: 26 },
+    { wch: 8 },
+    { wch: 14 },
+    { wch: 15 },
+    { wch: 11 },
+    { wch: 13 },
+    { wch: 17 },
+    { wch: 14 },
+  ];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Məhsullar");
+  XLSX.writeFile(wb, "stockpilot-mehsul-import-nuemune.xlsx");
 }
 window.startStockPilot = () => {
   $("profileBtn").onclick = () => (location.href = "account.html");
@@ -388,6 +600,12 @@ window.startStockPilot = () => {
   $("openSettings").onclick = tariffSettings;
   $("newOrderTop").onclick = newOrder;
   $("exportBtn").onclick = exportExcel;
+  $("importBtn").onclick = () => $("excelImport").click();
+  $("templateBtn").onclick = downloadImportTemplate;
+  $("excelImport").onchange = (event) => {
+    importItems(event.target.files[0]);
+    event.target.value = "";
+  };
   $("closeModal").onclick = hideModal;
   $("modal").onclick = (e) => {
     if (e.target === $("modal")) hideModal();

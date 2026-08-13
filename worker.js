@@ -17,7 +17,6 @@ async function hash(p, s) {
   );
   return b64(
     await crypto.subtle.deriveBits(
-      // Cloudflare Workers supports a maximum of 100,000 PBKDF2 iterations.
       { name: "PBKDF2", salt: from64(s), iterations: 100000, hash: "SHA-256" },
       k,
       256,
@@ -91,7 +90,9 @@ export default {
         file = f.get("photo");
       if (file && typeof file !== "string" && file.size) {
         if (!e.IMAGES)
-          return fail("Profil şəkli hazırda aktiv deyil. Şəkilsiz qeydiyyatdan keçin.");
+          return fail(
+            "Profil şəkli hazırda aktiv deyil. Şəkilsiz qeydiyyatdan keçin.",
+          );
         if (file.size > 4e6) return fail("Şəkil maksimum 4MB olmalıdır.");
         key = `profiles/${id}/${crypto.randomUUID()}`;
         await e.IMAGES.put(key, file.stream(), {

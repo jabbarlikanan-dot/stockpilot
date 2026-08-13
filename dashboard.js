@@ -79,6 +79,17 @@ function drawStats(state) {
   const detail = document.getElementById("detail");
   if (detail)
     detail.innerHTML = `<p class="notice">Bu profilə aid ümumi nəticə: <b>${format(sum(items))}</b> satış, <b>${format(sum(items, profitValue))}</b> qazanc.</p>`;
+  const grouped = items.reduce((result, item) => {
+    const key = item.name || "Adsız məhsul";
+    result[key] = (result[key] || 0) + profitValue(item);
+    return result;
+  }, {});
+  const top = Object.entries(grouped)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3);
+  const topProducts = document.getElementById("topProducts");
+  if (topProducts)
+    topProducts.innerHTML = `<h2>Ən çox qazandıran 3 məhsul</h2>${top.length ? `<ol>${top.map(([name, profit]) => `<li><span>${name}</span><b>${format(profit)}</b></li>`).join("")}</ol>` : '<p class="notice">Satılmış məhsul olduqda burada görünəcək.</p>'}`;
 }
 async function boot() {
   let state;
