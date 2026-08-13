@@ -17,7 +17,8 @@ async function hash(p, s) {
   );
   return b64(
     await crypto.subtle.deriveBits(
-      { name: "PBKDF2", salt: from64(s), iterations: 150000, hash: "SHA-256" },
+      // Cloudflare Workers supports a maximum of 100,000 PBKDF2 iterations.
+      { name: "PBKDF2", salt: from64(s), iterations: 100000, hash: "SHA-256" },
       k,
       256,
     ),
