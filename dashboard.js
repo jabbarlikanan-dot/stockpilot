@@ -1,6 +1,4 @@
 const token = localStorage.stockpilotToken;
-const LOCAL_USERS_KEY = "stockpilotLocalUsersV1";
-const isLocal = token && token.startsWith("local:");
 if (!token) location.href = "index.html";
 const request = (path, options = {}) =>
   fetch(path, {
@@ -8,16 +6,6 @@ const request = (path, options = {}) =>
     headers: { Authorization: `Bearer ${token}`, ...(options.headers || {}) },
   });
 let me;
-function users() {
-  try {
-    return JSON.parse(localStorage.getItem(LOCAL_USERS_KEY) || "[]");
-  } catch {
-    return [];
-  }
-}
-function localUser() {
-  return users().find((item) => item.username === token.slice(6));
-}
 function logout() {
   localStorage.removeItem("stockpilotToken");
   location.href = "index.html";
@@ -94,20 +82,14 @@ function drawStats(state) {
 }
 async function boot() {
   let state;
-  if (isLocal) {
-    me = localUser();
-    if (!me) return logout();
-    state = me.state || { orders: [] };
-  } else {
-    try {
-      const user = await request("/api/me");
-      if (!user.ok) return logout();
-      me = (await user.json()).user;
-      const saved = await request("/api/state");
-      state = saved.ok ? (await saved.json()).state : { orders: [] };
-    } catch {
-      return logout();
-    }
+  try {
+    const user = await request("/api/me");
+    if (!user.ok) return logout();
+    me = (await user.json()).user;
+    const saved = await request("/api/state");
+    state = saved.ok ? (await saved.json()).state : { orders: [] };
+  } catch {
+    return logout();
   }
   paintUser();
   document

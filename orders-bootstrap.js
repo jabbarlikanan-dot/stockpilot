@@ -1,6 +1,4 @@
-const LOCAL_USERS_KEY = "stockpilotLocalUsersV1";
 const token = localStorage.stockpilotToken;
-const isLocalSession = token && token.startsWith("local:");
 const defaultState = {
   active: null,
   orders: [],
@@ -27,16 +25,6 @@ const defaultState = {
 };
 let currentUser;
 
-function getLocalUsers() {
-  try {
-    return JSON.parse(localStorage.getItem(LOCAL_USERS_KEY) || "[]");
-  } catch {
-    return [];
-  }
-}
-function setLocalUsers(users) {
-  localStorage.setItem(LOCAL_USERS_KEY, JSON.stringify(users));
-}
 function logout() {
   localStorage.removeItem("stockpilotToken");
   location.href = "index.html";
@@ -49,23 +37,15 @@ function api(path, options = {}) {
 }
 
 window.persistStockState = async (state) => {
-  if (isLocalSession) {
-    const users = getLocalUsers(),
-      index = users.findIndex((user) => user.username === currentUser.username);
-    if (index >= 0) {
-      users[index].state = state;
-      setLocalUsers(users);
-    }
-    return;
-  }
   try {
-    await api("/api/state", {
+    const response = await api("/api/state", {
       method: "PUT",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ state }),
     });
+    if (!response.ok) throw new Error("State save failed");
   } catch {
-    console.warn("Məlumat hələ serverə yazılmadı.");
+    console.error("Məlumat serverə yazılmadı.");
   }
 };
 
@@ -80,22 +60,14 @@ window.accountPanel = () => {
 async function start() {
   if (!token) return logout();
   let state = defaultState;
-  if (isLocalSession) {
-    currentUser = getLocalUsers().find(
-      (user) => user.username === token.slice(6),
-    );
-    if (!currentUser) return logout();
-    state = currentUser.state || defaultState;
-  } else {
-    try {
-      const me = await api("/api/me");
-      if (!me.ok) return logout();
-      currentUser = (await me.json()).user;
-      const saved = await api("/api/state");
-      if (saved.ok) state = (await saved.json()).state || defaultState;
-    } catch {
-      return logout();
-    }
+  try {
+    const me = await api("/api/me");
+    if (!me.ok) return logout();
+    currentUser = (await me.json()).user;
+    const saved = await api("/api/state");
+    if (saved.ok) state = (await saved.json()).state || defaultState;
+  } catch {
+    return logout();
   }
   state = {
     ...defaultState,
