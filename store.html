@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="az">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#080b07" />
+    <link rel="icon" type="image/png" href="stockpilot-192.png" />
+    <title>Mağaza — StockPilot</title>
+    <link rel="stylesheet" href="store.css" />
+  </head>
+  <body>
+    <header><a href="index.html">↑ StockPilot</a><button id="cartButton">Səbət <b id="cartCount">0</b></button></header>
+    <main><section class="hero"><p id="shopTag">ONLAYN MAĞAZA</p><h1 id="shopName">Mağaza yüklənir…</h1><p>Məhsulları seçin, rahat şəkildə sifariş edin.</p></section><div id="categories" class="categories"></div><section id="products" class="products"></section></main>
+    <aside id="cart" class="cart hidden"><header><b>Səbətiniz</b><button id="closeCart">×</button></header><div id="cartLines"></div><form id="checkout"><h2>Sifarişi tamamla</h2><input name="name" placeholder="Ad və soyad" required><input name="phone" placeholder="Telefon nömrəsi" required><textarea name="note" placeholder="Əlavə qeyd (istəyə bağlı)"></textarea><select name="delivery"><option value="metro">Metroda təhvil</option><option value="address">Ünvana çatdırılma</option></select><input name="metro" placeholder="Metro / rayon"><input name="address" placeholder="Tam ünvan"><select name="payment"><option value="cash">Nağd ödəniş</option><option value="card">Kartla ödəniş (çatdırılmada)</option></select><button class="buy">Sifarişi göndər</button><p id="message"></p></form></aside><script src="store.js"></script>
+  </body>
+</html>

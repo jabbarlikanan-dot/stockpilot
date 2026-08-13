@@ -64,8 +64,11 @@ async function start() {
     const me = await api("/api/me");
     if (!me.ok) return logout();
     currentUser = (await me.json()).user;
+    window.currentUser = currentUser;
     const saved = await api("/api/state");
     if (saved.ok) state = (await saved.json()).state || defaultState;
+    const customer = await api("/api/customer-orders");
+    window.__customerOrders = customer.ok ? (await customer.json()).orders || [] : [];
   } catch {
     return logout();
   }

@@ -39,6 +39,7 @@ state.ui = {
 let pendingImage = "",
   editing = null,
   lastDeleted = null;
+state.customerOrders = window.__customerOrders || [];
 const $ = (id) => document.getElementById(id);
 const money = (n) =>
   (Number(n) || 0).toLocaleString("az-AZ", {
@@ -313,7 +314,8 @@ function render() {
     ),
     todayValue = todaySold.reduce((s, i) => s + calc(i).sales, 0),
     rows = visibleItems(o);
-  $("content").innerHTML =
+  const customerBox = state.customerOrders.length ? `<section class="box customer-orders"><div><h2>Yeni müştəri sifarişləri</h2><p>${state.customerOrders.filter(x=>x.status==='new').length} yeni sifariş gözləyir</p></div>${state.customerOrders.slice(0,5).map(x=>`<article><b>${esc(x.customer.name)}</b><span>${esc(x.customer.phone)} · ${money(x.total)} ₼</span><small>${x.cart.map(i=>`${esc(i.name)} × ${i.quantity}`).join(', ')}${x.customer.note ? ` — ${esc(x.customer.note)}` : ''}</small><select data-customer-status="${x.id}">${['new','confirmed','preparing','courier','delivered','cancelled'].map(s=>`<option value="${s}" ${x.status===s?'selected':''}>${({new:'Yeni',confirmed:'Təsdiqləndi',preparing:'Hazırlanır',courier:'Kuryerdə',delivered:'Çatdırıldı',cancelled:'Ləğv edildi'})[s]}</option>`).join('')}</select></article>`).join('')}</section>` : '';
+  $("content").innerHTML = customerBox +
     `<section class="box orderbar"><div class="field name"><label>Sifarişin adı</label><input id="orderName" value="${esc(o.name)}"></div><div class="field"><label>Yaradılma tarixi</label><input readonly value="${dateTime(o.createdAt)}"></div><div class="field"><label>Büdcə (₼)</label><input id="budget" type="number" min="0" value="${o.budget || 0}"></div><div class="field"><label>Qısa qeyd</label><input id="orderNote" maxlength="80" value="${esc(o.note || "")}" placeholder="Məsələn: Avqust malları"></div><button id="archiveOrder" class="secondary">${o.archived ? "Arxivdən çıxar" : "Arxivlə"}</button><button id="deleteOrder" class="danger">Sifarişi sil</button></section><section class="box tools"><input id="search" value="${esc(state.ui.search)}" placeholder="Məhsul adında axtarış…"><select id="statusFilter"><option value="all">Bütün məhsullar</option><option value="sold" ${state.ui.status === "sold" ? "selected" : ""}>Satılanlar</option><option value="unsold" ${state.ui.status === "unsold" ? "selected" : ""}>Satılmayanlar</option></select><select id="orderSort"><option value="newest">Yeni sifarişlər əvvəl</option><option value="oldest" ${state.ui.orderSort === "oldest" ? "selected" : ""}>Köhnə sifarişlər əvvəl</option></select><small>Son yadda saxlanma: ${dateTime(state.ui.lastSavedAt)}</small></section><section class="workspace"><aside class="box form"><h2>${e ? "Məhsulu redaktə et" : "Məhsul əlavə et"}</h2><div class="grid"><div class="field wide"><label>Məhsulun adı</label><input id="name" value="${e ? esc(e.name) : ""}" placeholder="Məsələn: Kreatin"></div><div class="field"><label>Kateqoriya</label><select id="category">${["Əlavələr", "Geyim", "Elektronika", "Kosmetika", "Ev və digər"].map((v) => `<option ${e?.category === v ? "selected" : ""}>${v}</option>`).join("")}</select></div><div class="field"><label>Ölkə</label><select id="productCountry">${countryOptions(e ? e.country : "america")}</select></div><div class="field"><label>Say</label><div class="qty-control"><button type="button" id="qtyMinus">−</button><input id="qty" type="number" min="1" value="${e ? e.qty : 1}"><button type="button" id="qtyPlus">+</button></div></div><div class="field"><label>Minimum stok</label><input id="minStock" type="number" min="0" value="${e?.minStock ?? 3}"></div><div class="field"><label>Alış qiyməti</label><input id="price" type="number" min="0" step=".01" value="${e ? e.price : 0}"></div><div class="field"><label>Satış qiyməti (₼)</label><input id="sale" type="number" min="0" step=".01" value="${e ? e.sale : 0}"></div><div class="field wide"><label>Çəki (qram, ümumi)</label><input id="weight" type="number" min="0" value="${e ? e.weight : 0}"></div><div class="field wide"><label>Məhsul şəkli</label><input id="image" class="file" type="file" accept="image/png,image/jpeg,image/webp">${e && pendingImage ? '<button id="deleteImage" class="remove" style="margin-top:8px">Şəkli sil</button>' : ""}</div></div><p class="hint">Seçilən ölkənin tarifi və məzənnəsi avtomatik tətbiq olunur.</p><button id="saveItem" class="primary save">${e ? "Dəyişiklikləri yadda saxla" : "Listə əlavə et"}</button>${e ? '<button id="cancelEdit" class="secondary save">Ləğv et</button>' : ""}</aside><section class="box tablebox"><div class="scroll"><table class="items"><thead><tr><th>Şəkil</th><th>Məhsul / kateqoriya</th><th>Ölkə</th><th>Say</th><th>Alış</th><th>Karqo</th><th>Ümumi alış</th><th>Satış</th><th>Qazanc</th><th>Faiz</th><th>Status</th><th>Əməliyyat</th></tr></thead><tbody>${
       rows.length
         ? rows
@@ -394,6 +396,7 @@ function bind(o, e) {
     };
   $("saveItem").onclick = () => {
     const i = {
+      id: e?.id || crypto.randomUUID(),
       name: $("name").value.trim(),
       category: $("category").value,
       country: $("productCountry").value,
@@ -454,6 +457,11 @@ function bind(o, e) {
         render();
       }),
   );
+  document.querySelectorAll("[data-customer-status]").forEach((select) => (select.onchange = async () => {
+    const response = await fetch(`/api/customer-orders/${select.dataset.customerStatus}`, { method: 'PUT', headers: { 'content-type': 'application/json', Authorization: `Bearer ${localStorage.stockpilotToken}` }, body: JSON.stringify({ status: select.value }) });
+    if (!response.ok) return alert('Status yadda saxlanmadı.');
+    if (select.value === 'delivered') location.reload();
+  }));
 }
 function showModal(title, html) {
   $("modalTitle").textContent = title;
@@ -600,6 +608,7 @@ function importItems(file) {
             readImportValue(row, ["status", "satilib", "sold"]),
           );
           return {
+            id: crypto.randomUUID(),
             name,
             qty,
             category:
@@ -693,6 +702,8 @@ window.startStockPilot = () => {
   $("exportBtn").onclick = exportExcel;
   $("importBtn").onclick = () => $("excelImport").click();
   $("templateBtn").onclick = downloadImportTemplate;
+  $("storeBtn").onclick = () => window.open(`store.html?shop=${encodeURIComponent(window.currentUser?.username || '')}`, '_blank');
+  $("quoteBtn").onclick = () => { const o = active(); const w = window.open('', '_blank'); w.document.write(`<title>Qiymət təklifi</title><h1>${esc(o.name)}</h1><p>${o.items.map(i=>`${esc(i.name)} — ${money(calc(i).sales)} ₼`).join('<br>')}</p><h2>Cəmi: ${money(totals(o).sales)} ₼</h2><p>StockPilot qiymət təklifi</p>`); w.document.close(); w.print(); };
   $("excelImport").onchange = (event) => {
     importItems(event.target.files[0]);
     event.target.value = "";
@@ -701,5 +712,9 @@ window.startStockPilot = () => {
   $("modal").onclick = (e) => {
     if (e.target === $("modal")) hideModal();
   };
+  if (new URLSearchParams(location.search).get("add") === "1") {
+    state.ui.productFormOpen = true;
+    history.replaceState({}, "", "dashboard.html");
+  }
   render();
 };

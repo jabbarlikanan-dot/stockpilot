@@ -261,6 +261,14 @@ button {
   background: #151b12;
   box-shadow: 0 16px 40px #0008;
 }
+.customer-orders { padding: 16px; margin-bottom: 15px; display: grid; gap: 9px; }
+.customer-orders h2 { margin: 0; font-size: 16px; }
+.customer-orders p { margin: 3px 0 7px; color: var(--muted); }
+.customer-orders article { display: grid; grid-template-columns: 1fr auto; gap: 4px 16px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; }
+.customer-orders article span, .customer-orders article small { color: var(--muted); }
+.customer-orders article small { grid-column: 1/-1; }
+.customer-orders select { width: 135px; grid-row: 1/3; grid-column: 2; }
+.mobile-bottom { display: none; }
 @media (max-width: 900px) {
   .tools {
     grid-template-columns: 1fr 1fr;
@@ -607,6 +615,13 @@ select:focus {
   .workspace {
     grid-template-columns: 285px minmax(0, 1fr);
   }
+  main { padding-bottom: 84px; }
+  .mobile-bottom { position: fixed; z-index: 30; inset: auto 0 0; display: grid; grid-template-columns: repeat(4, 1fr); gap: 4px; padding: 8px 7px calc(8px + env(safe-area-inset-bottom)); background: #11160ef5; border-top: 1px solid var(--line); backdrop-filter: blur(14px); }
+  .mobile-bottom a { min-height: 48px; display: grid; place-items: center; gap: 1px; color: var(--muted); text-decoration: none; font-size: 10px; font-weight: 800; border-radius: 10px; }
+  .mobile-bottom a i { font-style: normal; font-size: 18px; line-height: 1; }
+  .mobile-bottom a.active, .mobile-bottom a:hover { background: #26301d; color: var(--lime); }
+  .customer-orders article { grid-template-columns: 1fr; }
+  .customer-orders select { width: 100%; grid-row: auto; grid-column: auto; }
 }
 @media (max-width: 760px) {
   .shell {

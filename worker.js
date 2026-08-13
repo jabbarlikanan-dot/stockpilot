@@ -54,6 +54,24 @@ const pub = (u) => ({
   lastName: u.last_name,
   photo: u.photo_key ? `/api/images/${u.photo_key}` : null,
 });
+const readState = async (e, id) => {
+  const row = await e.DB.prepare("SELECT state_json FROM user_state WHERE user_id=?").bind(id).first();
+  return row ? JSON.parse(row.state_json) : { orders: [] };
+};
+const productList = (state) =>
+  (state.orders || []).flatMap((order) =>
+    (order.items || []).map((item, index) => ({
+      id: item.id || `${order.id}:${index}`,
+      name: item.name,
+      category: item.category || "Digər",
+      price: Number(item.sale) || 0,
+      quantity: Number(item.qty) || 0,
+      image: item.img || "",
+      orderId: order.id,
+      index,
+      sold: Boolean(item.sold),
+    })),
+  );
 export default {
   async fetch(r, e) {
     const u = new URL(r.url),
@@ -134,6 +152,32 @@ export default {
         return fail("Məlumatlar yanlışdır.", 401);
       return json({ token: await issue(user, e.AUTH_SECRET), user: pub(user) });
     }
+    const storeMatch = p.match(/^\/api\/store\/([\w.-]{3,30})$/);
+    if (storeMatch && r.method === "GET") {
+      const owner = await e.DB.prepare("SELECT * FROM users WHERE username=?").bind(storeMatch[1]).first();
+      if (!owner) return fail("Mağaza tapılmadı.", 404);
+      const state = await readState(e, owner.id);
+      return json({ shop: { username: owner.username, name: `${owner.first_name} ${owner.last_name}` }, products: productList(state).filter((x) => !x.sold && x.quantity > 0) });
+    }
+    const storeOrderMatch = p.match(/^\/api\/store\/([\w.-]{3,30})\/orders$/);
+    if (storeOrderMatch && r.method === "POST") {
+      const owner = await e.DB.prepare("SELECT * FROM users WHERE username=?").bind(storeOrderMatch[1]).first();
+      if (!owner) return fail("Mağaza tapılmadı.", 404);
+      const body = await r.json();
+      const name = String(body.name || "").trim(), phone = String(body.phone || "").trim();
+      if (!name || !phone || !Array.isArray(body.cart) || !body.cart.length) return fail("Ad, telefon və məhsullar tələb olunur.");
+      const products = productList(await readState(e, owner.id));
+      const cart = [];
+      for (const line of body.cart) {
+        const product = products.find((x) => x.id === line.id && !x.sold);
+        const quantity = Math.max(1, Number(line.quantity) || 1);
+        if (!product || quantity > product.quantity) return fail("Məhsul stokda yoxdur.", 409);
+        cart.push({ ...product, quantity });
+      }
+      const order = { id: crypto.randomUUID(), customer: { name, phone, note: String(body.note || "").slice(0, 500), delivery: String(body.delivery || "metro"), metro: String(body.metro || ""), address: String(body.address || ""), payment: String(body.payment || "cash") }, cart, total: cart.reduce((s, x) => s + x.price * x.quantity, 0), createdAt: new Date().toISOString() };
+      await e.DB.prepare("INSERT INTO customer_orders(id,owner_user_id,order_json,status) VALUES(?,?,?,?)").bind(order.id, owner.id, JSON.stringify(order), "new").run();
+      return json({ ok: true, orderId: order.id }, 201);
+    }
     const user = await who(r, e);
     if (p === "/api/me")
       return user
@@ -196,6 +240,31 @@ export default {
           .run();
         return json({ ok: true });
       }
+    }
+    if (p === "/api/customer-orders" && r.method === "GET") {
+      if (!user) return fail("Giriş tələb olunur.", 401);
+      const rows = await e.DB.prepare("SELECT id,order_json,status,created_at,updated_at FROM customer_orders WHERE owner_user_id=? ORDER BY created_at DESC").bind(user.id).all();
+      return json({ orders: (rows.results || []).map((row) => ({ ...JSON.parse(row.order_json), status: row.status, createdAt: row.created_at, updatedAt: row.updated_at })) });
+    }
+    const customerMatch = p.match(/^\/api\/customer-orders\/([\w-]+)$/);
+    if (customerMatch && r.method === "PUT") {
+      if (!user) return fail("Giriş tələb olunur.", 401);
+      const status = String((await r.json()).status || "new");
+      if (!['new','confirmed','preparing','courier','delivered','cancelled'].includes(status)) return fail("Status düzgün deyil.");
+      const row = await e.DB.prepare("SELECT order_json,status FROM customer_orders WHERE id=? AND owner_user_id=?").bind(customerMatch[1], user.id).first();
+      if (!row) return fail("Sifariş tapılmadı.", 404);
+      if (status === 'delivered' && row.status !== 'delivered') {
+        const state = await readState(e, user.id), order = JSON.parse(row.order_json);
+        for (const line of order.cart || []) {
+          for (const ownerOrder of state.orders || []) for (let i = 0; i < (ownerOrder.items || []).length; i++) {
+            const item = ownerOrder.items[i], itemId = item.id || `${ownerOrder.id}:${i}`;
+            if (itemId === line.id) { item.qty = Math.max(0, (Number(item.qty) || 0) - line.quantity); if (!item.qty) { item.sold = true; item.soldAt = new Date().toISOString(); } }
+          }
+        }
+        await e.DB.prepare("UPDATE user_state SET state_json=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?").bind(JSON.stringify(state), user.id).run();
+      }
+      await e.DB.prepare("UPDATE customer_orders SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND owner_user_id=?").bind(status, customerMatch[1], user.id).run();
+      return json({ ok: true });
     }
     return e.ASSETS.fetch(r);
   },
