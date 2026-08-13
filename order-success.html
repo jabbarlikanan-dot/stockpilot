@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="az">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#080b07" />
+    <link rel="icon" type="image/png" href="stockpilot-192.png" />
+    <title>Sifariş qəbul edildi — StockPilot</title>
+    <link rel="stylesheet" href="store.css" />
+    <link rel="stylesheet" href="store-success.css" />
+  </head>
+  <body>
+    <main class="success-wrap">
+      <section class="success-card">
+        <div class="success-mark">✓</div>
+        <p>STOCKPILOT MAĞAZA</p>
+        <h1>Sifarişiniz qəbul edildi</h1>
+        <p>Məhsulunuz qısa müddət ərzində hazırlanacaq və çatdırılma üçün sizinlə əlaqə saxlanılacaqdır.</p>
+        <p id="orderRef"></p>
+        <a id="returnStore" href="store.html">Mağazaya qayıt</a>
+      </section>
+    </main>
+    <script>
+      const params = new URLSearchParams(location.search);
+      const shop = params.get('shop') || '';
+      const orderId = params.get('id') || '';
+      document.getElementById('returnStore').href = `store.html?shop=${encodeURIComponent(shop)}`;
+      document.getElementById('orderRef').textContent = orderId ? `Sifariş kodu: ${orderId.slice(0, 8).toUpperCase()}` : '';
+    </script>
+  </body>
+</html>

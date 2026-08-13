@@ -262,12 +262,18 @@ button {
   box-shadow: 0 16px 40px #0008;
 }
 .customer-orders { padding: 16px; margin-bottom: 15px; display: grid; gap: 9px; }
+.customer-heading { display: flex; justify-content: space-between; align-items: center; gap: 12px; }
 .customer-orders h2 { margin: 0; font-size: 16px; }
 .customer-orders p { margin: 3px 0 7px; color: var(--muted); }
-.customer-orders article { display: grid; grid-template-columns: 1fr auto; gap: 4px 16px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; }
-.customer-orders article span, .customer-orders article small { color: var(--muted); }
-.customer-orders article small { grid-column: 1/-1; }
-.customer-orders select { width: 135px; grid-row: 1/3; grid-column: 2; }
+.customer-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 16px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.012); }
+.customer-card.done { opacity: .78; }
+.customer-card-main { min-width: 0; display: grid; gap: 4px; }
+.customer-card-main span, .customer-card-main small { color: var(--muted); }
+.customer-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
+.customer-actions select { width: 132px; }
+.customer-actions .edit, .customer-actions .remove, .customer-actions .whatsapp { padding: 8px 10px; margin: 0; }
+.whatsapp { display: inline-flex; align-items: center; text-decoration: none; border-radius: 8px; font: 700 12px Arial; background: #173b2a; color: #d5ffe1; }
+.customer-history { display: grid; gap: 10px; max-height: 65vh; overflow: auto; padding-right: 3px; }
 .mobile-bottom { display: none; }
 @media (max-width: 900px) {
   .tools {
@@ -291,6 +297,11 @@ button {
   }
   .disclosure summary { min-height: 58px; padding: 10px 12px; }
   .disclosure summary b { max-width: 250px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .customer-heading { align-items: flex-start; flex-direction: column; }
+  .customer-heading .secondary { width: 100%; }
+  .customer-card { grid-template-columns: 1fr; }
+  .customer-actions { justify-content: stretch; }
+  .customer-actions > * { flex: 1 1 110px; text-align: center; }
 }
 .tab,
 .plus {

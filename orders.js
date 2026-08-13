@@ -34,11 +34,13 @@ state.ui = {
   orderDetailsOpen: false,
   filtersOpen: false,
   productFormOpen: false,
+  panel: "personal",
   ...(state.ui || {}),
 };
 let pendingImage = "",
   editing = null,
   lastDeleted = null;
+const isCustomerPage = location.pathname.endsWith("customer-orders.html");
 state.customerOrders = window.__customerOrders || [];
 const $ = (id) => document.getElementById(id);
 const money = (n) =>
@@ -94,9 +96,41 @@ const dateTime = (v) =>
         timeStyle: "short",
       }).format(new Date(v))
     : "—";
+const customerStatus = {
+  new: "Yeni",
+  confirmed: "Təsdiqləndi",
+  preparing: "Hazırlanır",
+  courier: "Kuryerdə",
+  delivered: "Tamamlandı",
+  cancelled: "Ləğv edildi",
+};
+const terminalCustomerStatus = new Set(["delivered", "cancelled"]);
+const phoneForWhatsApp = (value) => {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (digits.startsWith("994")) return digits;
+  if (digits.startsWith("0")) return `994${digits.slice(1)}`;
+  return digits.length <= 9 ? `994${digits}` : digits;
+};
+const whatsappLink = (order) => {
+  const phone = phoneForWhatsApp(order.customer?.phone);
+  const message = `Salam, ${order.customer?.name || ""}! Sifarişinizin statusu: ${customerStatus[order.status] || "Yeni"}. Sifariş: ${(order.cart || []).map((item) => `${item.name} × ${item.quantity}`).join(", ")}.`;
+  return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+};
+function customerOrderCard(order, compact = false) {
+  const statusOptions = Object.entries(customerStatus)
+    .map(([key, label]) => `<option value="${key}" ${order.status === key ? "selected" : ""}>${label}</option>`)
+    .join("");
+  return `<article class="customer-card ${terminalCustomerStatus.has(order.status) ? "done" : ""}">
+    <div class="customer-card-main"><b>${esc(order.customer?.name)}</b><span>${esc(order.customer?.phone)} · ${money(order.total)} ₼</span>
+    <small>${(order.cart || []).map((item) => `${esc(item.name)} × ${item.quantity}`).join(", ")}${order.customer?.note ? ` — ${esc(order.customer.note)}` : ""}</small>
+    <small>${dateTime(order.createdAt)}${order.customer?.delivery ? ` · ${esc(order.customer.delivery === "metro" ? "Metro təhvil" : "Ünvana çatdırılma")}` : ""}${order.customer?.preferredAt ? ` · İstədiyi vaxt: ${dateTime(order.customer.preferredAt)}` : ""}</small></div>
+    <div class="customer-actions"><select data-customer-status="${order.id}" ${order.status === "delivered" ? "disabled" : ""}>${statusOptions}</select>
+    <button class="edit" data-customer-edit="${order.id}">Redaktə</button><a class="whatsapp" data-customer-whatsapp="${order.id}" href="${whatsappLink(order)}" target="_blank" rel="noopener">WhatsApp</a><button class="remove" data-customer-delete="${order.id}">Sil</button></div>
+  </article>`;
+}
 function calc(i) {
   const c = country(i.country),
-    q = +i.qty || 0,
+    q = +(i.acquiredQty ?? i.qty) || 0,
     ship = shipping(i.weight, i.country),
     purchase = ((+i.price || 0) * q + ship) * c.rate,
     sales = (+i.sale || 0) * q;
@@ -110,7 +144,7 @@ function calc(i) {
   };
 }
 function totals(o) {
-  return (o.items || []).reduce(
+  const total = (o.items || []).reduce(
     (a, i) => {
       const x = calc(i);
       a.purchase += x.purchase;
@@ -124,6 +158,14 @@ function totals(o) {
     },
     { purchase: 0, sales: 0, profit: 0, items: 0, sold: 0 },
   );
+  (state.customerSales || [])
+    .filter((sale) => sale.orderId === o.id)
+    .forEach((sale) => {
+      total.sales += Number(sale.sales) || 0;
+      total.profit += (Number(sale.sales) || 0) - (Number(sale.purchase) || 0);
+      total.sold += Number(sale.quantity) || 0;
+    });
+  return total;
 }
 function allTotals() {
   return state.orders.reduce(
@@ -134,6 +176,70 @@ function allTotals() {
     },
     { purchase: 0, sales: 0, profit: 0, items: 0, sold: 0 },
   );
+}
+async function refreshCustomerOrders() {
+  const response = await fetch("/api/customer-orders", {
+    headers: { Authorization: `Bearer ${localStorage.stockpilotToken}` },
+  });
+  if (!response.ok) throw new Error("Sifarişlər yenilənmədi.");
+  state.customerOrders = (await response.json()).orders || [];
+  const stateResponse = await fetch("/api/state", {
+    headers: { Authorization: `Bearer ${localStorage.stockpilotToken}` },
+  });
+  if (stateResponse.ok) {
+    const fresh = (await stateResponse.json()).state || {};
+    state.orders = Array.isArray(fresh.orders) ? fresh.orders : state.orders;
+    state.customerSales = Array.isArray(fresh.customerSales) ? fresh.customerSales : state.customerSales;
+    state.countries = { ...state.countries, ...(fresh.countries || {}) };
+  }
+}
+function customerHistory() {
+  const history = [...state.customerOrders].sort(
+    (a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt),
+  );
+  showModal(
+    "Bütün müştəri sifarişləri",
+    `<p class="hint">Tamamlanan və ya ləğv edilən sifarişlər əsas ekrandan çıxarılır, burada tarixçədə qalır.</p><div class="customer-history">${history.length ? history.map((order) => customerOrderCard(order)).join("") : "<p class=\"hint\">Hələ müştəri sifarişi yoxdur.</p>"}</div>`,
+  );
+  bindCustomerOrderActions();
+}
+function editCustomerOrder(id) {
+  const order = state.customerOrders.find((item) => item.id === id);
+  if (!order) return;
+  const customer = order.customer || {};
+  showModal(
+    "Müştəri sifarişini redaktə et",
+    `<div class="grid"><div class="field"><label>Ad soyad</label><input id="customerName" value="${esc(customer.name)}"></div><div class="field"><label>Telefon</label><input id="customerPhone" value="${esc(customer.phone)}"></div><div class="field wide"><label>Qeyd</label><input id="customerNote" value="${esc(customer.note || "")}"></div><div class="field"><label>Çatdırılma</label><select id="customerDelivery"><option value="metro" ${customer.delivery === "metro" ? "selected" : ""}>Metro təhvil</option><option value="address" ${customer.delivery === "address" ? "selected" : ""}>Ünvana çatdırılma</option></select></div><div class="field"><label>İstədiyi tarix/saat</label><input id="customerPreferredAt" type="datetime-local" value="${esc(customer.preferredAt || "")}"></div><div class="field"><label>Metro / rayon</label><input id="customerMetro" value="${esc(customer.metro || "")}"></div><div class="field wide"><label>Ünvan</label><input id="customerAddress" value="${esc(customer.address || "")}"></div><div class="field wide"><label>Ödəniş</label><select id="customerPayment"><option value="cash" ${customer.payment === "cash" ? "selected" : ""}>Nağd ödəniş</option><option value="card" ${customer.payment === "card" ? "selected" : ""}>Kartla ödəniş</option></select></div></div><button id="saveCustomerEdit" class="primary" style="margin-top:14px">Dəyişiklikləri yadda saxla</button>`,
+  );
+  $("saveCustomerEdit").onclick = async () => {
+    const response = await fetch(`/api/customer-orders/${id}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json", Authorization: `Bearer ${localStorage.stockpilotToken}` },
+      body: JSON.stringify({ status: order.status, customer: { name: $("customerName").value, phone: $("customerPhone").value, note: $("customerNote").value, delivery: $("customerDelivery").value, preferredAt: $("customerPreferredAt").value, metro: $("customerMetro").value, address: $("customerAddress").value, payment: $("customerPayment").value } }),
+    });
+    if (!response.ok) return alert("Dəyişiklik yadda saxlanmadı.");
+    await refreshCustomerOrders();
+    hideModal();
+    render();
+  };
+}
+function bindCustomerOrderActions() {
+  document.querySelectorAll("[data-customer-status]").forEach((select) => (select.onchange = async () => {
+    const response = await fetch(`/api/customer-orders/${select.dataset.customerStatus}`, { method: "PUT", headers: { "content-type": "application/json", Authorization: `Bearer ${localStorage.stockpilotToken}` }, body: JSON.stringify({ status: select.value }) });
+    if (!response.ok) return alert("Status yadda saxlanmadı.");
+    await refreshCustomerOrders();
+    hideModal();
+    render();
+  }));
+  document.querySelectorAll("[data-customer-edit]").forEach((button) => (button.onclick = () => editCustomerOrder(button.dataset.customerEdit)));
+  document.querySelectorAll("[data-customer-delete]").forEach((button) => (button.onclick = async () => {
+    if (!confirm("Müştəri sifarişi silinsin?")) return;
+    const response = await fetch(`/api/customer-orders/${button.dataset.customerDelete}`, { method: "DELETE", headers: { Authorization: `Bearer ${localStorage.stockpilotToken}` } });
+    if (!response.ok) return alert("Sifariş silinmədi.");
+    await refreshCustomerOrders();
+    hideModal();
+    render();
+  }));
 }
 function newOrder() {
   const o = {
@@ -285,7 +391,15 @@ function compactPanels(order) {
     editing !== null || !order.items?.length || state.ui.productFormOpen,
   );
 }
+function renderCustomerPanel() {
+  const activeOrders = state.customerOrders.filter((order) => !terminalCustomerStatus.has(order.status));
+  const completedOrders = state.customerOrders.filter((order) => terminalCustomerStatus.has(order.status));
+  $("content").innerHTML = `<section class="box customer-orders customer-panel"><div class="customer-heading"><div><h2>Müştəri sifarişləri</h2><p>${activeOrders.length} aktiv · ${completedOrders.length} tamamlanan və ya ləğv edilən</p></div><button id="customerHistory" class="secondary">Ümumi tarixçə (${state.customerOrders.length})</button></div>${activeOrders.length ? activeOrders.map((order) => customerOrderCard(order)).join("") : '<p class="hint">Hazırda aktiv müştəri sifarişi yoxdur.</p>'}</section>`;
+  if ($("customerHistory")) $("customerHistory").onclick = customerHistory;
+  bindCustomerOrderActions();
+}
 function render() {
+  if (isCustomerPage) return renderCustomerPanel();
   if (!state.orders.length) return newOrder();
   $("archiveToggle").textContent = state.ui.showArchived
     ? "Aktiv sifarişlər"
@@ -312,10 +426,12 @@ function render() {
     todaySold = (o.items || []).filter(
       (i) => i.sold && i.soldAt && new Date(i.soldAt).toDateString() === today,
     ),
-    todayValue = todaySold.reduce((s, i) => s + calc(i).sales, 0),
+    todayCustomerSales = (state.customerSales || []).filter(
+      (sale) => sale.orderId === o.id && sale.soldAt && new Date(sale.soldAt).toDateString() === today,
+    ),
+    todayValue = todaySold.reduce((s, i) => s + calc(i).sales, 0) + todayCustomerSales.reduce((sum, sale) => sum + (Number(sale.sales) || 0), 0),
     rows = visibleItems(o);
-  const customerBox = state.customerOrders.length ? `<section class="box customer-orders"><div><h2>Yeni müştəri sifarişləri</h2><p>${state.customerOrders.filter(x=>x.status==='new').length} yeni sifariş gözləyir</p></div>${state.customerOrders.slice(0,5).map(x=>`<article><b>${esc(x.customer.name)}</b><span>${esc(x.customer.phone)} · ${money(x.total)} ₼</span><small>${x.cart.map(i=>`${esc(i.name)} × ${i.quantity}`).join(', ')}${x.customer.note ? ` — ${esc(x.customer.note)}` : ''}</small><select data-customer-status="${x.id}">${['new','confirmed','preparing','courier','delivered','cancelled'].map(s=>`<option value="${s}" ${x.status===s?'selected':''}>${({new:'Yeni',confirmed:'Təsdiqləndi',preparing:'Hazırlanır',courier:'Kuryerdə',delivered:'Çatdırıldı',cancelled:'Ləğv edildi'})[s]}</option>`).join('')}</select></article>`).join('')}</section>` : '';
-  $("content").innerHTML = customerBox +
+  $("content").innerHTML =
     `<section class="box orderbar"><div class="field name"><label>Sifarişin adı</label><input id="orderName" value="${esc(o.name)}"></div><div class="field"><label>Yaradılma tarixi</label><input readonly value="${dateTime(o.createdAt)}"></div><div class="field"><label>Büdcə (₼)</label><input id="budget" type="number" min="0" value="${o.budget || 0}"></div><div class="field"><label>Qısa qeyd</label><input id="orderNote" maxlength="80" value="${esc(o.note || "")}" placeholder="Məsələn: Avqust malları"></div><button id="archiveOrder" class="secondary">${o.archived ? "Arxivdən çıxar" : "Arxivlə"}</button><button id="deleteOrder" class="danger">Sifarişi sil</button></section><section class="box tools"><input id="search" value="${esc(state.ui.search)}" placeholder="Məhsul adında axtarış…"><select id="statusFilter"><option value="all">Bütün məhsullar</option><option value="sold" ${state.ui.status === "sold" ? "selected" : ""}>Satılanlar</option><option value="unsold" ${state.ui.status === "unsold" ? "selected" : ""}>Satılmayanlar</option></select><select id="orderSort"><option value="newest">Yeni sifarişlər əvvəl</option><option value="oldest" ${state.ui.orderSort === "oldest" ? "selected" : ""}>Köhnə sifarişlər əvvəl</option></select><small>Son yadda saxlanma: ${dateTime(state.ui.lastSavedAt)}</small></section><section class="workspace"><aside class="box form"><h2>${e ? "Məhsulu redaktə et" : "Məhsul əlavə et"}</h2><div class="grid"><div class="field wide"><label>Məhsulun adı</label><input id="name" value="${e ? esc(e.name) : ""}" placeholder="Məsələn: Kreatin"></div><div class="field"><label>Kateqoriya</label><select id="category">${["Əlavələr", "Geyim", "Elektronika", "Kosmetika", "Ev və digər"].map((v) => `<option ${e?.category === v ? "selected" : ""}>${v}</option>`).join("")}</select></div><div class="field"><label>Ölkə</label><select id="productCountry">${countryOptions(e ? e.country : "america")}</select></div><div class="field"><label>Say</label><div class="qty-control"><button type="button" id="qtyMinus">−</button><input id="qty" type="number" min="1" value="${e ? e.qty : 1}"><button type="button" id="qtyPlus">+</button></div></div><div class="field"><label>Minimum stok</label><input id="minStock" type="number" min="0" value="${e?.minStock ?? 3}"></div><div class="field"><label>Alış qiyməti</label><input id="price" type="number" min="0" step=".01" value="${e ? e.price : 0}"></div><div class="field"><label>Satış qiyməti (₼)</label><input id="sale" type="number" min="0" step=".01" value="${e ? e.sale : 0}"></div><div class="field wide"><label>Çəki (qram, ümumi)</label><input id="weight" type="number" min="0" value="${e ? e.weight : 0}"></div><div class="field wide"><label>Məhsul şəkli</label><input id="image" class="file" type="file" accept="image/png,image/jpeg,image/webp">${e && pendingImage ? '<button id="deleteImage" class="remove" style="margin-top:8px">Şəkli sil</button>' : ""}</div></div><p class="hint">Seçilən ölkənin tarifi və məzənnəsi avtomatik tətbiq olunur.</p><button id="saveItem" class="primary save">${e ? "Dəyişiklikləri yadda saxla" : "Listə əlavə et"}</button>${e ? '<button id="cancelEdit" class="secondary save">Ləğv et</button>' : ""}</aside><section class="box tablebox"><div class="scroll"><table class="items"><thead><tr><th>Şəkil</th><th>Məhsul / kateqoriya</th><th>Ölkə</th><th>Say</th><th>Alış</th><th>Karqo</th><th>Ümumi alış</th><th>Satış</th><th>Qazanc</th><th>Faiz</th><th>Status</th><th>Əməliyyat</th></tr></thead><tbody>${
       rows.length
         ? rows
@@ -329,7 +445,7 @@ function render() {
             })
             .join("")
         : '<tr><td colspan="12" class="empty">Bu filterdə məhsul yoxdur.</td></tr>'
-    }</tbody></table></div></section></section><section class="metrics"><div class="box metric"><span>Ümumi alış</span><strong>${money(t.purchase)} ₼</strong></div><div class="box metric"><span>Bu gün satılanlar</span><strong>${todaySold.reduce((s, i) => s + (+i.qty || 0), 0)} ədəd</strong><small>${money(todayValue)} ₼ satış</small></div><div class="box metric"><span>Satış qazancı</span><strong class="lime">${money(t.profit)} ₼</strong></div><div class="box metric budget-card"><span>Büdcə: xərcləndi / qaldı</span><strong>${money(spent)} ₼ / ${money(Math.max(0, remain))} ₼</strong><div class="progress"><i style="width:${used}%"></i></div><small>${used.toFixed(1)}% xərclənib</small></div></section>`;
+    }</tbody></table></div></section></section><section class="metrics"><div class="box metric"><span>Ümumi alış</span><strong>${money(t.purchase)} ₼</strong></div><div class="box metric"><span>Bu gün satılanlar</span><strong>${todaySold.reduce((s, i) => s + (Number(i.acquiredQty ?? i.qty) || 0), 0) + todayCustomerSales.reduce((sum, sale) => sum + (Number(sale.quantity) || 0), 0)} ədəd</strong><small>${money(todayValue)} ₼ satış</small></div><div class="box metric"><span>Satış qazancı</span><strong class="lime">${money(t.profit)} ₼</strong></div><div class="box metric budget-card"><span>Büdcə: xərcləndi / qaldı</span><strong>${money(spent)} ₼ / ${money(Math.max(0, remain))} ₼</strong><div class="progress"><i style="width:${used}%"></i></div><small>${used.toFixed(1)}% xərclənib</small></div></section>`;
   compactPanels(o);
   bind(o, e);
   undoBox();
@@ -401,6 +517,7 @@ function bind(o, e) {
       category: $("category").value,
       country: $("productCountry").value,
       qty: +$("qty").value || 0,
+      acquiredQty: e ? Number(e.acquiredQty ?? e.qty) || 0 : +$("qty").value || 0,
       minStock: +$("minStock").value || 0,
       price: +$("price").value || 0,
       sale: +$("sale").value || 0,
@@ -453,15 +570,14 @@ function bind(o, e) {
         const i = o.items[+b.dataset.sold];
         i.sold = !i.sold;
         i.soldAt = i.sold ? new Date().toISOString() : null;
+        i.acquiredQty = Number(i.acquiredQty ?? i.qty) || 0;
+        i.qty = i.sold ? 0 : i.acquiredQty;
         save();
         render();
       }),
   );
-  document.querySelectorAll("[data-customer-status]").forEach((select) => (select.onchange = async () => {
-    const response = await fetch(`/api/customer-orders/${select.dataset.customerStatus}`, { method: 'PUT', headers: { 'content-type': 'application/json', Authorization: `Bearer ${localStorage.stockpilotToken}` }, body: JSON.stringify({ status: select.value }) });
-    if (!response.ok) return alert('Status yadda saxlanmadı.');
-    if (select.value === 'delivered') location.reload();
-  }));
+  if ($("customerHistory")) $("customerHistory").onclick = customerHistory;
+  bindCustomerOrderActions();
 }
 function showModal(title, html) {
   $("modalTitle").textContent = title;
@@ -475,12 +591,12 @@ function tariffSettings() {
   const rows = Object.entries(state.countries)
     .map(
       ([k, c]) =>
-        `<div class="country-editor"><b>${c.name} (${c.currency})</b>${c.tariffs.map((v, n) => `<input data-country="${k}" data-tariff="${n}" type="number" step=".01" value="${v}">`).join("")}<input data-rate="${k}" type="number" step=".01" value="${c.rate}" title="AZN məzənnəsi"></div>`,
+        `<div class="country-editor"><div class="tariff-title"><input data-country-name="${k}" value="${esc(c.name)}" aria-label="Ölkə adı"><input data-currency="${k}" value="${esc(c.currency)}" maxlength="3" aria-label="Valyuta"><span>Tarif sırası: 0–100 / 101–250 / 251–500 / 501–1000 qr</span></div>${c.tariffs.map((v, n) => `<input data-country="${k}" data-tariff="${n}" type="number" step=".01" value="${v}" aria-label="Tarif ${n + 1}">`).join("")}<input data-rate="${k}" type="number" step=".01" value="${c.rate}" title="AZN məzənnəsi" aria-label="AZN məzənnəsi"></div>`,
     )
     .join("");
   showModal(
     "Tarif və məzənnə ayarları",
-    `<p class="hint">Sıra: 0–100 qr, 101–250 qr, 251–500 qr, 501 qr–1 kq, AZN məzənnəsi.</p>${rows}<button id="saveTariffs" class="primary" style="margin-top:12px">Tarifləri yadda saxla</button>`,
+    `<p class="hint">Buradan tarif planını istədiyiniz vaxt dəyişə bilərsiniz. Son xana seçilmiş valyutanın 1 vahidinin AZN məzənnəsidir.</p>${rows}<button id="saveTariffs" class="primary" style="margin-top:12px">Tarifləri yadda saxla</button>`,
   );
   $("saveTariffs").onclick = () => {
     document
@@ -493,6 +609,12 @@ function tariffSettings() {
     document
       .querySelectorAll("[data-rate]")
       .forEach((x) => (state.countries[x.dataset.rate].rate = +x.value || 0));
+    document.querySelectorAll("[data-country-name]").forEach((x) => {
+      state.countries[x.dataset.countryName].name = x.value.trim() || "Ölkə";
+    });
+    document.querySelectorAll("[data-currency]").forEach((x) => {
+      state.countries[x.dataset.currency].currency = x.value.trim() || "₼";
+    });
     save();
     hideModal();
     render();
@@ -611,6 +733,7 @@ function importItems(file) {
             id: crypto.randomUUID(),
             name,
             qty,
+            acquiredQty: qty,
             category:
               String(readImportValue(row, ["kateqoriya", "category"])).trim() ||
               "Ev və digər",
@@ -690,21 +813,35 @@ function downloadImportTemplate() {
 }
 window.startStockPilot = () => {
   $("profileBtn").onclick = () => (location.href = "profile.html");
+  if (isCustomerPage) {
+    $("personalOrdersPanel").onclick = () => (location.href = "dashboard.html");
+  } else {
+    $("customerOrdersPanel").onclick = () => (location.href = "customer-orders.html");
+  }
   $("openStats").onclick = () => (location.href = "account.html");
   $("openSettings").onclick = tariffSettings;
-  $("newOrderTop").onclick = newOrder;
-  $("archiveToggle").onclick = () => {
+  if ($("newOrderTop")) $("newOrderTop").onclick = newOrder;
+  if ($("archiveToggle")) $("archiveToggle").onclick = () => {
     state.ui.showArchived = !state.ui.showArchived;
     state.active = sortedOrders()[0]?.id || null;
     save();
     render();
   };
-  $("exportBtn").onclick = exportExcel;
-  $("importBtn").onclick = () => $("excelImport").click();
-  $("templateBtn").onclick = downloadImportTemplate;
+  if ($("exportBtn")) $("exportBtn").onclick = exportExcel;
+  if ($("importBtn")) $("importBtn").onclick = () => $("excelImport").click();
+  if ($("templateBtn")) $("templateBtn").onclick = downloadImportTemplate;
   $("storeBtn").onclick = () => window.open(`store.html?shop=${encodeURIComponent(window.currentUser?.username || '')}`, '_blank');
-  $("quoteBtn").onclick = () => { const o = active(); const w = window.open('', '_blank'); w.document.write(`<title>Qiymət təklifi</title><h1>${esc(o.name)}</h1><p>${o.items.map(i=>`${esc(i.name)} — ${money(calc(i).sales)} ₼`).join('<br>')}</p><h2>Cəmi: ${money(totals(o).sales)} ₼</h2><p>StockPilot qiymət təklifi</p>`); w.document.close(); w.print(); };
-  $("excelImport").onchange = (event) => {
+  if ($("quoteBtn")) $("quoteBtn").onclick = () => {
+    const o = active();
+    const w = window.open("", "_blank");
+    const itemText = o.items
+      .map((item) => `${esc(item.name)} — ${money(calc(item).sales)} ₼`)
+      .join("<br>");
+    w.document.write(`<title>Qiymət təklifi</title><h1>${esc(o.name)}</h1><p>${itemText}</p><h2>Cəmi: ${money(totals(o).sales)} ₼</h2><p>StockPilot qiymət təklifi</p>`);
+    w.document.close();
+    w.print();
+  };
+  if ($("excelImport")) $("excelImport").onchange = (event) => {
     importItems(event.target.files[0]);
     event.target.value = "";
   };
@@ -712,7 +849,7 @@ window.startStockPilot = () => {
   $("modal").onclick = (e) => {
     if (e.target === $("modal")) hideModal();
   };
-  if (new URLSearchParams(location.search).get("add") === "1") {
+  if (!isCustomerPage && new URLSearchParams(location.search).get("add") === "1") {
     state.ui.productFormOpen = true;
     history.replaceState({}, "", "dashboard.html");
   }

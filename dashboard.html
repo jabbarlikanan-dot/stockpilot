@@ -17,14 +17,14 @@
         <div class="logo"><i class="brand-mark">↑</i>StockPilot</div>
         <span class="nav-title">İdarəetmə</span>
         <nav>
-          <button class="active">
-            <span class="nav-icon icon-orders"></span>Sifarişlər</button
+          <button id="personalOrdersPanel" class="active">
+            <span class="nav-icon icon-orders"></span>Şəxsi sifarişlər</button
+          ><a id="customerOrdersPanel" class="nav-link" href="customer-orders.html">
+            <span class="nav-icon icon-orders"></span>Müştəri sifarişləri</a
           ><button id="openStats">
             <span class="nav-icon icon-stats"></span>Ümumi statistika</button
           ><a class="nav-link" href="inventory.html">
             <span class="nav-icon icon-orders"></span>Stok nəzarəti</a
-          ><a class="nav-link" href="cargo.html">
-            <span class="nav-icon icon-settings"></span>Karqo kalkulyatoru</a
           ><button id="openSettings">
             <span class="nav-icon icon-settings"></span>Ayarlar</button
           ><button id="logout">
@@ -49,9 +49,9 @@
         </header>
         <section class="heading">
           <div>
-            <h1>Sifarişlər</h1>
+            <h1>Şəxsi sifarişlər</h1>
             <p>
-              Məhsulları, ölkə üzrə karqonu və qazancı bir paneldə idarə et.
+              Alış, satış, qazanc və stoku bir paneldə izləyin.
             </p>
           </div>
           <div class="heading-actions"><button id="archiveToggle" class="secondary">Arxiv</button><button id="newOrderTop" class="primary">+ Yeni sifariş</button></div>

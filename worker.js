@@ -72,6 +72,54 @@ const productList = (state) =>
       sold: Boolean(item.sold),
     })),
   );
+const whatsappStatuses = {
+  new: "Yeni sifarişiniz qəbul edildi.",
+  confirmed: "Sifarişiniz təsdiqləndi.",
+  preparing: "Sifarişiniz hazırlanır.",
+  courier: "Sifarişiniz kuryerə verildi.",
+  delivered: "Sifarişiniz çatdırıldı. Təşəkkür edirik!",
+  cancelled: "Sifarişiniz ləğv edildi.",
+};
+const whatsappPhone = (value) => {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (digits.startsWith("994")) return digits;
+  if (digits.startsWith("0")) return `994${digits.slice(1)}`;
+  return digits.length <= 9 ? `994${digits}` : digits;
+};
+async function sendWhatsAppStatus(e, order, status) {
+  if (!e.WA_TOKEN || !e.WA_PHONE_NUMBER_ID || !e.WA_TEMPLATE_NAME) return false;
+  const to = whatsappPhone(order.customer?.phone);
+  if (!to) return false;
+  const response = await fetch(
+    `https://graph.facebook.com/v22.0/${e.WA_PHONE_NUMBER_ID}/messages`,
+    {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${e.WA_TOKEN}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        messaging_product: "whatsapp",
+        to,
+        type: "template",
+        template: {
+          name: e.WA_TEMPLATE_NAME,
+          language: { code: e.WA_TEMPLATE_LANGUAGE || "az" },
+          components: [
+            {
+              type: "body",
+              parameters: [
+                { type: "text", text: order.customer?.name || "Müştəri" },
+                { type: "text", text: whatsappStatuses[status] || "Sifarişiniz yeniləndi." },
+              ],
+            },
+          ],
+        },
+      }),
+    },
+  );
+  return response.ok;
+}
 export default {
   async fetch(r, e) {
     const u = new URL(r.url),
@@ -125,7 +173,7 @@ export default {
       await e.DB.prepare(
         "INSERT INTO user_state(user_id,state_json) VALUES(?,?)",
       )
-        .bind(id, '{"orders":[]}')
+        .bind(id, '{"orders":[],"customerSales":[]}')
         .run();
       const user = {
         id,
@@ -174,7 +222,7 @@ export default {
         if (!product || quantity > product.quantity) return fail("Məhsul stokda yoxdur.", 409);
         cart.push({ ...product, quantity });
       }
-      const order = { id: crypto.randomUUID(), customer: { name, phone, note: String(body.note || "").slice(0, 500), delivery: String(body.delivery || "metro"), metro: String(body.metro || ""), address: String(body.address || ""), payment: String(body.payment || "cash") }, cart, total: cart.reduce((s, x) => s + x.price * x.quantity, 0), createdAt: new Date().toISOString() };
+      const order = { id: crypto.randomUUID(), customer: { name, phone, note: String(body.note || "").slice(0, 500), delivery: String(body.delivery || "metro"), metro: String(body.metro || ""), address: String(body.address || ""), payment: String(body.payment || "cash"), preferredAt: String(body.preferredAt || "").slice(0, 40) }, cart, total: cart.reduce((s, x) => s + x.price * x.quantity, 0), createdAt: new Date().toISOString() };
       await e.DB.prepare("INSERT INTO customer_orders(id,owner_user_id,order_json,status) VALUES(?,?,?,?)").bind(order.id, owner.id, JSON.stringify(order), "new").run();
       return json({ ok: true, orderId: order.id }, 201);
     }
@@ -247,24 +295,65 @@ export default {
       return json({ orders: (rows.results || []).map((row) => ({ ...JSON.parse(row.order_json), status: row.status, createdAt: row.created_at, updatedAt: row.updated_at })) });
     }
     const customerMatch = p.match(/^\/api\/customer-orders\/([\w-]+)$/);
+    if (customerMatch && r.method === "DELETE") {
+      if (!user) return fail("Giriş tələb olunur.", 401);
+      const result = await e.DB.prepare(
+        "DELETE FROM customer_orders WHERE id=? AND owner_user_id=?",
+      )
+        .bind(customerMatch[1], user.id)
+        .run();
+      if (!result.meta.changes) return fail("Sifariş tapılmadı.", 404);
+      return json({ ok: true });
+    }
     if (customerMatch && r.method === "PUT") {
       if (!user) return fail("Giriş tələb olunur.", 401);
-      const status = String((await r.json()).status || "new");
+      const body = await r.json();
+      const status = String(body.status || "new");
       if (!['new','confirmed','preparing','courier','delivered','cancelled'].includes(status)) return fail("Status düzgün deyil.");
       const row = await e.DB.prepare("SELECT order_json,status FROM customer_orders WHERE id=? AND owner_user_id=?").bind(customerMatch[1], user.id).first();
       if (!row) return fail("Sifariş tapılmadı.", 404);
+      const order = JSON.parse(row.order_json);
+      if (body.customer && typeof body.customer === "object") {
+        const next = body.customer;
+        order.customer = {
+          ...order.customer,
+          name: String(next.name ?? order.customer.name ?? "").trim().slice(0, 100),
+          phone: String(next.phone ?? order.customer.phone ?? "").trim().slice(0, 50),
+          note: String(next.note ?? order.customer.note ?? "").trim().slice(0, 500),
+          delivery: String(next.delivery ?? order.customer.delivery ?? "metro").slice(0, 30),
+          metro: String(next.metro ?? order.customer.metro ?? "").trim().slice(0, 100),
+          address: String(next.address ?? order.customer.address ?? "").trim().slice(0, 300),
+          payment: String(next.payment ?? order.customer.payment ?? "cash").slice(0, 30),
+          preferredAt: String(next.preferredAt ?? order.customer.preferredAt ?? "").slice(0, 40),
+        };
+        if (!order.customer.name || !order.customer.phone)
+          return fail("Müştərinin adı və telefonu tələb olunur.");
+      }
       if (status === 'delivered' && row.status !== 'delivered') {
-        const state = await readState(e, user.id), order = JSON.parse(row.order_json);
+        const state = await readState(e, user.id);
+        state.customerSales = Array.isArray(state.customerSales) ? state.customerSales : [];
         for (const line of order.cart || []) {
           for (const ownerOrder of state.orders || []) for (let i = 0; i < (ownerOrder.items || []).length; i++) {
             const item = ownerOrder.items[i], itemId = item.id || `${ownerOrder.id}:${i}`;
-            if (itemId === line.id) { item.qty = Math.max(0, (Number(item.qty) || 0) - line.quantity); if (!item.qty) { item.sold = true; item.soldAt = new Date().toISOString(); } }
+            if (itemId === line.id) {
+              const deliveredQty = Math.min(Number(item.qty) || 0, Number(line.quantity) || 0);
+              if (!deliveredQty) continue;
+              item.acquiredQty = Number(item.acquiredQty ?? item.qty) || 0;
+              item.qty = Math.max(0, (Number(item.qty) || 0) - deliveredQty);
+              state.customerSales.push({
+                id: crypto.randomUUID(), customerOrderId: customerMatch[1], orderId: ownerOrder.id,
+                itemId, name: item.name || line.name || "Məhsul", quantity: deliveredQty, sales: (Number(item.sale) || 0) * deliveredQty,
+                purchase: ((Number(item.price) || 0) * deliveredQty) * (item.country === "spain" ? 1.96 : 1.7),
+                soldAt: new Date().toISOString(),
+              });
+            }
           }
         }
         await e.DB.prepare("UPDATE user_state SET state_json=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?").bind(JSON.stringify(state), user.id).run();
       }
-      await e.DB.prepare("UPDATE customer_orders SET status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND owner_user_id=?").bind(status, customerMatch[1], user.id).run();
-      return json({ ok: true });
+      await e.DB.prepare("UPDATE customer_orders SET order_json=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND owner_user_id=?").bind(JSON.stringify(order), status, customerMatch[1], user.id).run();
+      const messageSent = status !== row.status ? await sendWhatsAppStatus(e, order, status).catch(() => false) : false;
+      return json({ ok: true, messageSent, order: { ...order, status } });
     }
     return e.ASSETS.fetch(r);
   },

@@ -35,9 +35,12 @@ function paintUser() {
     );
 }
 function soldValue(item) {
+  if (item.customerSale) return Number(item.sales) || 0;
   return (+item.sale || 0) * (+item.qty || 0);
 }
 function profitValue(item) {
+  if (item.customerSale)
+    return (Number(item.sales) || 0) - (Number(item.purchase) || 0);
   const rate = item.country === "spain" ? 1.96 : 1.7;
   return soldValue(item) - (+item.price || 0) * (+item.qty || 0) * rate;
 }
@@ -46,7 +49,16 @@ function drawStats(state) {
     weekStart = startOfWeek(now),
     items = (state.orders || [])
       .flatMap((order) => order.items || [])
-      .filter((item) => item.sold);
+      .filter((item) => item.sold)
+      .concat(
+        (state.customerSales || []).map((sale) => ({
+          ...sale,
+          customerSale: true,
+          sold: true,
+          name: sale.name || "Müştəri sifarişi",
+          qty: sale.quantity,
+        })),
+      );
   const inPeriod = (test) =>
     items.filter((item) => item.soldAt && test(new Date(item.soldAt)));
   const today = inPeriod((date) => sameDay(date, now)),
