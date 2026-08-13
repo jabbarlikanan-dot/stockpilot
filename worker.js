@@ -139,6 +139,44 @@ export default {
       return user
         ? json({ user: pub(user) })
         : fail("Giriş tələb olunur.", 401);
+    if (p === "/api/profile" && r.method === "PUT") {
+      if (!user) return fail("Giriş tələb olunur.", 401);
+      const body = await r.json();
+      const first = String(body.firstName || "").trim();
+      const last = String(body.lastName || "").trim();
+      const username = String(body.username || "").trim();
+      const currentPassword = String(body.currentPassword || "");
+      const newPassword = String(body.newPassword || "");
+      if (!first || !last || !/^[\w.-]{3,30}$/.test(username))
+        return fail("Ad, soyad və username düzgün yazılmalıdır.");
+      const other = await e.DB.prepare(
+        "SELECT id FROM users WHERE username=? AND id<>?",
+      )
+        .bind(username, user.id)
+        .first();
+      if (other) return fail("Bu username artıq istifadə olunur.", 409);
+      let passwordHash = user.password_hash;
+      if (newPassword) {
+        if (!/^\d{4}$/.test(newPassword))
+          return fail("Yeni şifrə 4 rəqəm olmalıdır.");
+        if ((await hash(currentPassword, user.salt)) !== user.password_hash)
+          return fail("Hazırkı şifrə yanlışdır.", 401);
+        passwordHash = await hash(newPassword, user.salt);
+      }
+      await e.DB.prepare(
+        "UPDATE users SET username=?,first_name=?,last_name=?,password_hash=? WHERE id=?",
+      )
+        .bind(username, first, last, passwordHash, user.id)
+        .run();
+      const updated = {
+        ...user,
+        username,
+        first_name: first,
+        last_name: last,
+        password_hash: passwordHash,
+      };
+      return json({ token: await issue(updated, e.AUTH_SECRET), user: pub(updated) });
+    }
     if (p === "/api/state") {
       if (!user) return fail("Giriş tələb olunur.", 401);
       if (r.method === "GET") {

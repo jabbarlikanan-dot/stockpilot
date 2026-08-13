@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="az">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#080b07" />
+    <link rel="icon" type="image/png" href="stockpilot-192.png" />
+    <link rel="stylesheet" href="app.css" />
+    <title>Profil ayarları — StockPilot</title>
+  </head>
+  <body>
+    <div class="dash">
+      <aside class="side">
+        <div class="brand"><i class="brand-mark">↑</i>StockPilot</div>
+        <nav>
+          <a href="dashboard.html">▦ Sifarişlər</a>
+          <a href="account.html">◔ Ümumi statistika</a>
+          <a href="inventory.html">▤ Stok nəzarəti</a>
+          <a href="cargo.html">⌁ Karqo kalkulyatoru</a>
+          <a class="active" href="profile.html">⚙ Profil ayarları</a>
+          <a href="#" id="logout">↪ Çıxış</a>
+        </nav>
+      </aside>
+      <main class="main">
+        <header class="top"><span>İdarəetmə paneli / Profil</span><div id="user" class="user"></div></header>
+        <section class="page-title"><h1>Profil ayarları</h1><p>Şəxsi məlumatlarını və giriş məlumatlarını təhlükəsiz şəkildə idarə et.</p></section>
+        <section class="profile-layout">
+          <article class="card profile-card"><div id="profileHero"></div><p class="notice">Profil şəkli hazırkı pulsuz versiyada qeydiyyat zamanı əlavə olunur. Digər məlumatları buradan yeniləyə bilərsən.</p></article>
+          <form id="profileForm" class="card settings-form">
+            <h2>Şəxsi məlumatlar</h2>
+            <div class="two"><label>Ad<input name="firstName" required /></label><label>Soyad<input name="lastName" required /></label></div>
+            <label>Username<input name="username" required minlength="3" /></label>
+            <hr />
+            <h2>Şifrəni dəyiş</h2><p class="notice">Dəyişmək istəmirsənsə, aşağıdakı hissəni boş saxla.</p>
+            <div class="two"><label>Hazırkı 4 rəqəmli şifrə<input name="currentPassword" inputmode="numeric" maxlength="4" type="password" /></label><label>Yeni 4 rəqəmli şifrə<input name="newPassword" inputmode="numeric" maxlength="4" type="password" /></label></div>
+            <small id="message" class="msg"></small><button class="primary">Dəyişiklikləri yadda saxla</button>
+          </form>
+        </section>
+      </main>
+    </div>
+    <script src="profile.js"></script>
+  </body>
+</html>

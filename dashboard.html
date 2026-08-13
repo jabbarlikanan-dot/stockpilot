@@ -21,6 +21,10 @@
             <span class="nav-icon icon-orders"></span>Sifarişlər</button
           ><button id="openStats">
             <span class="nav-icon icon-stats"></span>Ümumi statistika</button
+          ><a class="nav-link" href="inventory.html">
+            <span class="nav-icon icon-orders"></span>Stok nəzarəti</a
+          ><a class="nav-link" href="cargo.html">
+            <span class="nav-icon icon-settings"></span>Karqo kalkulyatoru</a
           ><button id="openSettings">
             <span class="nav-icon icon-settings"></span>Ayarlar</button
           ><button id="logout">
@@ -36,7 +40,7 @@
             <button id="importBtn" class="secondary">Excel-dən əlavə et</button
             ><button id="templateBtn" class="secondary">Nümunə Excel</button
             ><button id="exportBtn" class="secondary">Excel ixracı</button
-            ><button id="profileBtn" class="profile">
+            ><button id="profileBtn" class="profile" title="Profil ayarları">
               <b id="profileInitial">U</b><span id="profileName">Hesabım</span>
             </button>
           </div>
@@ -48,7 +52,7 @@
               Məhsulları, ölkə üzrə karqonu və qazancı bir paneldə idarə et.
             </p>
           </div>
-          <button id="newOrderTop" class="primary">+ Yeni sifariş</button>
+          <div class="heading-actions"><button id="archiveToggle" class="secondary">Arxiv</button><button id="newOrderTop" class="primary">+ Yeni sifariş</button></div>
         </section>
         <div id="tabs" class="tabs"></div>
         <section id="content"></section>

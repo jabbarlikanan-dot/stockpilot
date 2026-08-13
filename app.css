@@ -799,3 +799,102 @@ input:focus {
     transition-duration: 0.01ms !important;
   }
 }
+
+/* Yeni idarəetmə səhifələri: eyni yüngül vizual dil və tam mobil uyğunluq. */
+.profile-layout,
+.cargo-layout {
+  display: grid;
+  grid-template-columns: minmax(230px, 0.7fr) minmax(380px, 1.3fr);
+  gap: 14px;
+  align-items: start;
+}
+.profile-card {
+  min-height: 280px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  text-align: center;
+}
+.profile-card h2 { margin: 10px 0 0; }
+.profile-card p { margin: 0; }
+.hero-avatar {
+  width: 92px;
+  height: 92px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 28px;
+  background: linear-gradient(135deg, var(--lime), #8da71a);
+  box-shadow: 0 14px 35px rgba(198, 217, 44, 0.2);
+  color: #10140b;
+  font-size: 36px;
+  font-weight: 900;
+}
+.hero-avatar img { width: 100%; height: 100%; object-fit: cover; }
+.settings-form h2,
+.tariff-card h2 { margin: 0 0 14px; font-size: 18px; }
+.settings-form label,
+.cargo-form label {
+  display: block;
+  margin: 11px 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+.settings-form input,
+.cargo-form input,
+.cargo-form select,
+.inventory-toolbar input { display: block; width: 100%; margin-top: 7px; }
+.settings-form hr { margin: 20px 0; border: 0; border-top: 1px solid var(--line); }
+.settings-form .primary,
+.cargo-form .primary { width: 100%; margin-top: 14px; }
+.success { display: block; min-height: 18px; color: var(--lime) !important; }
+.inventory-toolbar { display: flex; align-items: center; gap: 14px; margin-bottom: 14px; }
+.inventory-toolbar input { flex: 1; margin: 0; }
+.inventory-toolbar label { white-space: nowrap; color: var(--muted); font-size: 13px; }
+.inventory-toolbar label input { display: inline; width: auto; accent-color: var(--lime); }
+.inventory-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.stock-card { display: grid; grid-template-columns: 58px 1fr auto; align-items: center; gap: 12px; }
+.stock-card.is-low { border-color: #96513e; box-shadow: 0 0 0 1px rgba(255, 112, 85, 0.09); }
+.stock-photo {
+  width: 58px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 16px;
+  background: #1a2216;
+  color: var(--lime);
+  font-size: 22px;
+}
+.stock-photo img { width: 100%; height: 100%; object-fit: cover; }
+.stock-copy h3 { margin: 4px 0; font-size: 15px; }
+.stock-copy p,
+.stock-copy small { margin: 0; color: var(--muted); font-size: 12px; }
+.stock-actions { display: grid; gap: 8px; }
+.qty-stepper { display: flex; align-items: center; justify-content: space-between; gap: 9px; padding: 3px 8px; border: 1px solid var(--line); border-radius: 10px; }
+.qty-stepper button { padding: 1px 5px; background: transparent; color: var(--lime); font-size: 18px; }
+.danger-value { color: #ff997d; }
+.empty-state { grid-column: 1 / -1; display: grid; min-height: 120px; place-items: center; color: var(--muted); }
+.cargo-form { padding: 22px; }
+.cargo-result { display: grid; min-height: 265px; align-content: center; background: radial-gradient(circle at top right, rgba(198,217,44,.2), transparent 50%), var(--panel); }
+.cargo-result span,
+.cargo-result p { margin: 0; color: var(--muted); }
+.cargo-result h2 { margin: 10px 0 4px; font-size: 42px; letter-spacing: -1px; }
+.cargo-result b { color: var(--lime); font-size: 26px; }
+.tariff-card { margin-top: 14px; }
+.tariff-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.tariff-list div { display: flex; justify-content: space-between; gap: 12px; padding: 13px; border: 1px solid var(--line); border-radius: 12px; color: var(--muted); font-size: 13px; }
+.tariff-list b { color: var(--text); text-align: right; }
+@media (max-width: 820px) {
+  .profile-layout,
+  .cargo-layout,
+  .inventory-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 560px) {
+  .inventory-toolbar { align-items: stretch; flex-direction: column; }
+  .stock-card { grid-template-columns: 48px 1fr; }
+  .stock-actions { grid-column: 1 / -1; grid-template-columns: 1fr 1fr; }
+  .tariff-list { grid-template-columns: 1fr; }
+}

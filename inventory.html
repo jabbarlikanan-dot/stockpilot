@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="az">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#080b07" />
+    <link rel="icon" type="image/png" href="stockpilot-192.png" />
+    <link rel="stylesheet" href="app.css" />
+    <title>Stok nəzarəti — StockPilot</title>
+  </head>
+  <body>
+    <div class="dash">
+      <aside class="side">
+        <div class="brand"><i class="brand-mark">↑</i>StockPilot</div>
+        <nav>
+          <a href="dashboard.html">▦ Sifarişlər</a>
+          <a href="account.html">◔ Ümumi statistika</a>
+          <a class="active" href="inventory.html">▤ Stok nəzarəti</a>
+          <a href="cargo.html">⌁ Karqo kalkulyatoru</a>
+          <a href="profile.html">⚙ Profil ayarları</a>
+          <a href="#" id="logout">↪ Çıxış</a>
+        </nav>
+      </aside>
+      <main class="main">
+        <header class="top"><span>İdarəetmə paneli / Stok</span><div id="user" class="user"></div></header>
+        <section class="page-title"><h1>Stok nəzarəti</h1><p>Qalan məhsulları bir yerdən yoxla, sayı dəyiş və satışa keçir.</p></section>
+        <section id="inventoryStats" class="stats inventory-stats"></section>
+        <section class="card inventory-toolbar"><input id="search" placeholder="Məhsul və ya sifariş üzrə axtar…" /><label><input id="onlyLow" type="checkbox" /> Yalnız az qalanlar</label></section>
+        <section id="inventory" class="inventory-grid"></section>
+      </main>
+    </div>
+    <script src="inventory.js"></script>
+  </body>
+</html>

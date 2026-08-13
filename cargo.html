@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="az">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#080b07" />
+    <link rel="icon" type="image/png" href="stockpilot-192.png" />
+    <link rel="stylesheet" href="app.css" />
+    <title>Karqo kalkulyatoru — StockPilot</title>
+  </head>
+  <body>
+    <div class="dash">
+      <aside class="side">
+        <div class="brand"><i class="brand-mark">↑</i>StockPilot</div>
+        <nav>
+          <a href="dashboard.html">▦ Sifarişlər</a>
+          <a href="account.html">◔ Ümumi statistika</a>
+          <a href="inventory.html">▤ Stok nəzarəti</a>
+          <a class="active" href="cargo.html">⌁ Karqo kalkulyatoru</a>
+          <a href="profile.html">⚙ Profil ayarları</a>
+          <a href="#" id="logout">↪ Çıxış</a>
+        </nav>
+      </aside>
+      <main class="main">
+        <header class="top"><span>İdarəetmə paneli / Karqo</span><div id="user" class="user"></div></header>
+        <section class="page-title"><h1>Sürətli karqo kalkulyatoru</h1><p>Çəkini daxil et, seçdiyin ölkənin tarifinə görə nəticəni dərhal gör.</p></section>
+        <section class="cargo-layout"><form class="card cargo-form"><label>Ölkə<select id="country"><option value="Amerika">Amerika</option><option value="Türkiyə">Türkiyə</option><option value="İspaniya">İspaniya</option></select></label><label>Çəki (qram)<input id="grams" type="number" min="1" value="100" /></label><button class="primary" type="button" id="calculate">Hesabla</button><p class="notice">Tariflər Ayarlar bölməsində dəyişdirilən şəxsi tariflərdən oxunur.</p></form><section id="result" class="card cargo-result"></section></section>
+        <section class="card tariff-card"><h2>Tarif pillələri</h2><div id="tariffs" class="tariff-list"></div></section>
+      </main>
+    </div>
+    <script src="cargo.js"></script>
+  </body>
+</html>

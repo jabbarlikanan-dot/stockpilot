@@ -17,4 +17,14 @@ Profil şəkli indi aktiv deyil; qeydiyyatda şəkil seçmədən davam edin. Bu,
 - Hər username ayrı profildir.
 - Sifariş, məhsul, foto və statistika həmin userə məxsusdur.
 - İstənilən cihazdan eyni username və 4 rəqəmli şifrə ilə giriş etmək olur.
-- “Satıldı et” seçimi satış tarixini saxlayır; statistika gün/həftə/ay/il üzrə bu məlumatlardan hesablanır.
+- "Satıldı et" seçimi satış tarixini saxlayır; statistika gün/həftə/ay/il üzrə bu məlumatlardan hesablanır.
+
+## Yeni idarəetmə alətləri
+
+- **Profil ayarları:** ad, soyad, username və 4 rəqəmli şifrəni dəyişmək mümkündür.
+- **Stok nəzarəti:** qalan say, minimum stok həddi, az qalan məhsullar, favorilər və sürətli `+ / −` say dəyişimi.
+- **Karqo kalkulyatoru:** Amerika, Türkiyə və İspaniya üçün şəxsi tariflərdən istifadə edən sürətli hesablama.
+- **Sifariş arxivi:** bitmiş sifarişləri aktiv siyahıdan gizlədib sonradan geri qaytarmaq.
+- **Məhsul idarəetməsi:** kateqoriya, qısa qeyd, axtarış, satılan/satılmayan filteri, silinən məhsulu geri qaytarma, Excel import/export.
+
+Bu səhifələrin hamısı eyni `username`-in D1-dəki şəxsi məlumatlarını oxuyur; başqa user-lərin sifarişləri görünmür.

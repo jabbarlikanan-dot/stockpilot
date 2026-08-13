@@ -29,7 +29,11 @@ state.ui = {
   search: "",
   status: "all",
   orderSort: "newest",
+  showArchived: false,
   lastSavedAt: null,
+  orderDetailsOpen: false,
+  filtersOpen: false,
+  productFormOpen: false,
   ...(state.ui || {}),
 };
 let pendingImage = "",
@@ -136,6 +140,7 @@ function newOrder() {
     name: `Sifariş ${state.orders.length + 1}`,
     budget: 0,
     note: "",
+    archived: false,
     createdAt: new Date().toISOString(),
     items: [],
   };
@@ -145,7 +150,9 @@ function newOrder() {
   render();
 }
 function sortedOrders() {
-  return [...state.orders].sort((a, b) =>
+  return state.orders
+    .filter((o) => Boolean(o.archived) === Boolean(state.ui.showArchived))
+    .sort((a, b) =>
     state.ui.orderSort === "oldest"
       ? new Date(a.createdAt) - new Date(b.createdAt)
       : new Date(b.createdAt) - new Date(a.createdAt),
@@ -189,6 +196,13 @@ function tabs() {
   );
   $("newOrder").onclick = newOrder;
 }
+function productDetail(item) {
+  const x = calc(item);
+  showModal(
+    item.name,
+    `<div class="detail-card">${item.img ? `<img class="thumb" src="${item.img}">` : '<div class="noimg">Şəkil<br>yoxdur</div>'}<div><p class="category">${esc(item.category || "Digər")} · ${x.c.name}</p><div class="detail-grid"><div>Say<b>${item.qty} ədəd</b></div><div>Çəki<b>${item.weight || 0} qr</b></div><div>Ümumi alış<b>${money(x.purchase)} ₼</b></div><div>Gözlənən qazanc<b class="lime">${money(x.profit)} ₼</b></div><div>Status<b>${item.sold ? `Satılıb — ${dateTime(item.soldAt)}` : "Satılmayıb"}</b></div><div>Karqo<b>${money(x.ship * x.c.rate)} ₼</b></div></div></div></div>`,
+  );
+}
 function countryOptions(selected) {
   return Object.entries(state.countries)
     .map(
@@ -230,12 +244,60 @@ function undoBox() {
     render();
   };
 }
+function collapsePanel(panel, id, title, info, opened) {
+  const disclosure = document.createElement("details");
+  disclosure.id = id;
+  disclosure.className = "box disclosure";
+  disclosure.open = Boolean(opened);
+  disclosure.innerHTML = `<summary><span><small>${title}</small><b>${info}</b></span><i>⌄</i></summary>`;
+  panel.parentNode.insertBefore(disclosure, panel);
+  panel.classList.remove("box");
+  disclosure.append(panel);
+  disclosure.ontoggle = () => {
+    if (id === "orderDetails") state.ui.orderDetailsOpen = disclosure.open;
+    if (id === "filterDetails") state.ui.filtersOpen = disclosure.open;
+    if (id === "productForm") state.ui.productFormOpen = disclosure.open;
+    save();
+  };
+}
+function compactPanels(order) {
+  collapsePanel(
+    document.querySelector(".orderbar"),
+    "orderDetails",
+    "Sifariş məlumatları",
+    `${esc(order.name)} · ${dateTime(order.createdAt)}`,
+    state.ui.orderDetailsOpen,
+  );
+  const activeFilter = state.ui.search || state.ui.status !== "all";
+  collapsePanel(
+    document.querySelector(".tools"),
+    "filterDetails",
+    "Axtarış və filterlər",
+    activeFilter ? "Filter aktivdir" : "Məhsulları tap və sırala",
+    state.ui.filtersOpen,
+  );
+  collapsePanel(
+    document.querySelector(".workspace .form"),
+    "productForm",
+    editing !== null ? "Məhsulu redaktə et" : "Məhsul əlavə et",
+    editing !== null ? "Dəyişikliklər üçün aç" : "Yeni məhsul əlavə etmək üçün aç",
+    editing !== null || !order.items?.length || state.ui.productFormOpen,
+  );
+}
 function render() {
   if (!state.orders.length) return newOrder();
+  $("archiveToggle").textContent = state.ui.showArchived
+    ? "Aktiv sifarişlər"
+    : "Arxiv";
   tabs();
   const o = active();
-  if (!o) {
-    state.active = state.orders[0].id;
+  if (!o || Boolean(o.archived) !== Boolean(state.ui.showArchived)) {
+    state.active = sortedOrders()[0]?.id || null;
+    if (!state.active && state.ui.showArchived) {
+      state.ui.showArchived = false;
+      return render();
+    }
+    if (!state.active) return newOrder();
     return render();
   }
   const e = Number.isInteger(editing) ? o.items[editing] : null;
@@ -252,7 +314,7 @@ function render() {
     todayValue = todaySold.reduce((s, i) => s + calc(i).sales, 0),
     rows = visibleItems(o);
   $("content").innerHTML =
-    `<section class="box orderbar"><div class="field name"><label>Sifarişin adı</label><input id="orderName" value="${esc(o.name)}"></div><div class="field"><label>Yaradılma tarixi</label><input readonly value="${dateTime(o.createdAt)}"></div><div class="field"><label>Büdcə (₼)</label><input id="budget" type="number" min="0" value="${o.budget || 0}"></div><div class="field"><label>Qısa qeyd</label><input id="orderNote" maxlength="80" value="${esc(o.note || "")}" placeholder="Məsələn: Avqust malları"></div><button id="deleteOrder" class="danger">Sifarişi sil</button></section><section class="box tools"><input id="search" value="${esc(state.ui.search)}" placeholder="Məhsul adında axtarış…"><select id="statusFilter"><option value="all">Bütün məhsullar</option><option value="sold" ${state.ui.status === "sold" ? "selected" : ""}>Satılanlar</option><option value="unsold" ${state.ui.status === "unsold" ? "selected" : ""}>Satılmayanlar</option></select><select id="orderSort"><option value="newest">Yeni sifarişlər əvvəl</option><option value="oldest" ${state.ui.orderSort === "oldest" ? "selected" : ""}>Köhnə sifarişlər əvvəl</option></select><small>Son yadda saxlanma: ${dateTime(state.ui.lastSavedAt)}</small></section><section class="workspace"><aside class="box form"><h2>${e ? "Məhsulu redaktə et" : "Məhsul əlavə et"}</h2><div class="grid"><div class="field wide"><label>Məhsulun adı</label><input id="name" value="${e ? esc(e.name) : ""}" placeholder="Məsələn: Kreatin"></div><div class="field"><label>Kateqoriya</label><select id="category">${["Əlavələr", "Geyim", "Elektronika", "Kosmetika", "Ev və digər"].map((v) => `<option ${e?.category === v ? "selected" : ""}>${v}</option>`).join("")}</select></div><div class="field"><label>Ölkə</label><select id="productCountry">${countryOptions(e ? e.country : "america")}</select></div><div class="field"><label>Say</label><div class="qty-control"><button type="button" id="qtyMinus">−</button><input id="qty" type="number" min="1" value="${e ? e.qty : 1}"><button type="button" id="qtyPlus">+</button></div></div><div class="field"><label>Alış qiyməti</label><input id="price" type="number" min="0" step=".01" value="${e ? e.price : 0}"></div><div class="field"><label>Satış qiyməti (₼)</label><input id="sale" type="number" min="0" step=".01" value="${e ? e.sale : 0}"></div><div class="field wide"><label>Çəki (qram, ümumi)</label><input id="weight" type="number" min="0" value="${e ? e.weight : 0}"></div><div class="field wide"><label>Məhsul şəkli</label><input id="image" class="file" type="file" accept="image/png,image/jpeg,image/webp">${e && pendingImage ? '<button id="deleteImage" class="remove" style="margin-top:8px">Şəkli sil</button>' : ""}</div></div><p class="hint">Seçilən ölkənin tarifi və məzənnəsi avtomatik tətbiq olunur.</p><button id="saveItem" class="primary save">${e ? "Dəyişiklikləri yadda saxla" : "Listə əlavə et"}</button>${e ? '<button id="cancelEdit" class="secondary save">Ləğv et</button>' : ""}</aside><section class="box tablebox"><div class="scroll"><table class="items"><thead><tr><th>Şəkil</th><th>Məhsul / kateqoriya</th><th>Ölkə</th><th>Say</th><th>Alış</th><th>Karqo</th><th>Ümumi alış</th><th>Satış</th><th>Qazanc</th><th>Faiz</th><th>Status</th><th>Əməliyyat</th></tr></thead><tbody>${
+    `<section class="box orderbar"><div class="field name"><label>Sifarişin adı</label><input id="orderName" value="${esc(o.name)}"></div><div class="field"><label>Yaradılma tarixi</label><input readonly value="${dateTime(o.createdAt)}"></div><div class="field"><label>Büdcə (₼)</label><input id="budget" type="number" min="0" value="${o.budget || 0}"></div><div class="field"><label>Qısa qeyd</label><input id="orderNote" maxlength="80" value="${esc(o.note || "")}" placeholder="Məsələn: Avqust malları"></div><button id="archiveOrder" class="secondary">${o.archived ? "Arxivdən çıxar" : "Arxivlə"}</button><button id="deleteOrder" class="danger">Sifarişi sil</button></section><section class="box tools"><input id="search" value="${esc(state.ui.search)}" placeholder="Məhsul adında axtarış…"><select id="statusFilter"><option value="all">Bütün məhsullar</option><option value="sold" ${state.ui.status === "sold" ? "selected" : ""}>Satılanlar</option><option value="unsold" ${state.ui.status === "unsold" ? "selected" : ""}>Satılmayanlar</option></select><select id="orderSort"><option value="newest">Yeni sifarişlər əvvəl</option><option value="oldest" ${state.ui.orderSort === "oldest" ? "selected" : ""}>Köhnə sifarişlər əvvəl</option></select><small>Son yadda saxlanma: ${dateTime(state.ui.lastSavedAt)}</small></section><section class="workspace"><aside class="box form"><h2>${e ? "Məhsulu redaktə et" : "Məhsul əlavə et"}</h2><div class="grid"><div class="field wide"><label>Məhsulun adı</label><input id="name" value="${e ? esc(e.name) : ""}" placeholder="Məsələn: Kreatin"></div><div class="field"><label>Kateqoriya</label><select id="category">${["Əlavələr", "Geyim", "Elektronika", "Kosmetika", "Ev və digər"].map((v) => `<option ${e?.category === v ? "selected" : ""}>${v}</option>`).join("")}</select></div><div class="field"><label>Ölkə</label><select id="productCountry">${countryOptions(e ? e.country : "america")}</select></div><div class="field"><label>Say</label><div class="qty-control"><button type="button" id="qtyMinus">−</button><input id="qty" type="number" min="1" value="${e ? e.qty : 1}"><button type="button" id="qtyPlus">+</button></div></div><div class="field"><label>Minimum stok</label><input id="minStock" type="number" min="0" value="${e?.minStock ?? 3}"></div><div class="field"><label>Alış qiyməti</label><input id="price" type="number" min="0" step=".01" value="${e ? e.price : 0}"></div><div class="field"><label>Satış qiyməti (₼)</label><input id="sale" type="number" min="0" step=".01" value="${e ? e.sale : 0}"></div><div class="field wide"><label>Çəki (qram, ümumi)</label><input id="weight" type="number" min="0" value="${e ? e.weight : 0}"></div><div class="field wide"><label>Məhsul şəkli</label><input id="image" class="file" type="file" accept="image/png,image/jpeg,image/webp">${e && pendingImage ? '<button id="deleteImage" class="remove" style="margin-top:8px">Şəkli sil</button>' : ""}</div></div><p class="hint">Seçilən ölkənin tarifi və məzənnəsi avtomatik tətbiq olunur.</p><button id="saveItem" class="primary save">${e ? "Dəyişiklikləri yadda saxla" : "Listə əlavə et"}</button>${e ? '<button id="cancelEdit" class="secondary save">Ləğv et</button>' : ""}</aside><section class="box tablebox"><div class="scroll"><table class="items"><thead><tr><th>Şəkil</th><th>Məhsul / kateqoriya</th><th>Ölkə</th><th>Say</th><th>Alış</th><th>Karqo</th><th>Ümumi alış</th><th>Satış</th><th>Qazanc</th><th>Faiz</th><th>Status</th><th>Əməliyyat</th></tr></thead><tbody>${
       rows.length
         ? rows
             .map(({ item: i, index: n }) => {
@@ -260,11 +322,13 @@ function render() {
                 im = i.img
                   ? `<img class="thumb" src="${i.img}">`
                   : '<div class="noimg">Şəkil<br>yoxdur</div>';
-              return `<tr><td>${im}</td><td><b>${esc(i.name)}</b><small class="category">${esc(i.category || "Digər")}</small></td><td>${x.c.name}</td><td class="num">${i.qty}</td><td class="num">${money((+i.price || 0) * (+i.qty || 0) * x.c.rate)} ₼</td><td class="num">${money(x.ship * x.c.rate)} ₼<br><small>${range(i.weight)}</small></td><td class="num">${money(x.purchase)} ₼</td><td class="num">${money(x.sales)} ₼</td><td class="num lime">${money(x.profit)} ₼</td><td class="num">${(x.pct * 100).toFixed(1)}%</td><td><button class="sold" data-sold="${n}">${i.sold ? `Satılıb<br><small>${dateTime(i.soldAt)}</small>` : "Satıldı et"}</button></td><td><button class="edit" data-edit="${n}">Redaktə</button><button class="remove" data-remove="${n}">Sil</button></td></tr>`;
+              const isLow = !i.sold && (+i.qty || 0) <= (+i.minStock || 3);
+              return `<tr><td>${im}</td><td><button class="fav ${i.favorite ? "active" : ""}" data-fav="${n}" title="Favorit">★</button><button class="product-link" data-detail="${n}"><b>${esc(i.name)}</b></button><small class="category">${esc(i.category || "Digər")}</small>${isLow ? '<small class="stock-low">Stok azalır</small>' : ""}</td><td>${x.c.name}</td><td class="num">${i.qty}</td><td class="num">${money((+i.price || 0) * (+i.qty || 0) * x.c.rate)} ₼</td><td class="num">${money(x.ship * x.c.rate)} ₼<br><small>${range(i.weight)}</small></td><td class="num">${money(x.purchase)} ₼</td><td class="num">${money(x.sales)} ₼</td><td class="num lime">${money(x.profit)} ₼</td><td class="num">${(x.pct * 100).toFixed(1)}%</td><td><button class="sold" data-sold="${n}">${i.sold ? `Satılıb<br><small>${dateTime(i.soldAt)}</small>` : "Satıldı et"}</button></td><td><button class="edit" data-edit="${n}">Redaktə</button><button class="remove" data-remove="${n}">Sil</button></td></tr>`;
             })
             .join("")
         : '<tr><td colspan="12" class="empty">Bu filterdə məhsul yoxdur.</td></tr>'
     }</tbody></table></div></section></section><section class="metrics"><div class="box metric"><span>Ümumi alış</span><strong>${money(t.purchase)} ₼</strong></div><div class="box metric"><span>Bu gün satılanlar</span><strong>${todaySold.reduce((s, i) => s + (+i.qty || 0), 0)} ədəd</strong><small>${money(todayValue)} ₼ satış</small></div><div class="box metric"><span>Satış qazancı</span><strong class="lime">${money(t.profit)} ₼</strong></div><div class="box metric budget-card"><span>Büdcə: xərcləndi / qaldı</span><strong>${money(spent)} ₼ / ${money(Math.max(0, remain))} ₼</strong><div class="progress"><i style="width:${used}%"></i></div><small>${used.toFixed(1)}% xərclənib</small></div></section>`;
+  compactPanels(o);
   bind(o, e);
   undoBox();
 }
@@ -304,6 +368,13 @@ function bind(o, e) {
       render();
     }
   };
+  $("archiveOrder").onclick = () => {
+    o.archived = !o.archived;
+    state.ui.showArchived = o.archived;
+    state.active = sortedOrders()[0]?.id || null;
+    save();
+    render();
+  };
   $("qtyMinus").onclick = () =>
     ($("qty").value = Math.max(1, (+$("qty").value || 1) - 1));
   $("qtyPlus").onclick = () => ($("qty").value = (+$("qty").value || 0) + 1);
@@ -327,10 +398,12 @@ function bind(o, e) {
       category: $("category").value,
       country: $("productCountry").value,
       qty: +$("qty").value || 0,
+      minStock: +$("minStock").value || 0,
       price: +$("price").value || 0,
       sale: +$("sale").value || 0,
       weight: +$("weight").value || 0,
       img: pendingImage,
+      favorite: e?.favorite || false,
       sold: e ? e.sold : false,
       soldAt: e?.soldAt || null,
     };
@@ -346,6 +419,18 @@ function bind(o, e) {
     (b) =>
       (b.onclick = () => {
         editing = +b.dataset.edit;
+        render();
+      }),
+  );
+  document.querySelectorAll("[data-detail]").forEach(
+    (b) => (b.onclick = () => productDetail(o.items[+b.dataset.detail])),
+  );
+  document.querySelectorAll("[data-fav]").forEach(
+    (b) =>
+      (b.onclick = () => {
+        const item = o.items[+b.dataset.fav];
+        item.favorite = !item.favorite;
+        save();
         render();
       }),
   );
@@ -595,10 +680,16 @@ function downloadImportTemplate() {
   XLSX.writeFile(wb, "stockpilot-mehsul-import-nuemune.xlsx");
 }
 window.startStockPilot = () => {
-  $("profileBtn").onclick = () => (location.href = "account.html");
+  $("profileBtn").onclick = () => (location.href = "profile.html");
   $("openStats").onclick = () => (location.href = "account.html");
   $("openSettings").onclick = tariffSettings;
   $("newOrderTop").onclick = newOrder;
+  $("archiveToggle").onclick = () => {
+    state.ui.showArchived = !state.ui.showArchived;
+    state.active = sortedOrders()[0]?.id || null;
+    save();
+    render();
+  };
   $("exportBtn").onclick = exportExcel;
   $("importBtn").onclick = () => $("excelImport").click();
   $("templateBtn").onclick = downloadImportTemplate;
