@@ -1,1 +1,122 @@
-<!doctype html><html lang="az"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#080b07"><link rel="icon" type="image/png" sizes="192x192" href="assets/icons/stockpilot-192.png"><link rel="apple-touch-icon" href="assets/icons/stockpilot-192.png"><link rel="manifest" href="manifest.webmanifest"><title>StockPilot</title><link rel="stylesheet" href="css/app.css"></head><body><section class="auth-shell"><div class="hero"><div class="brand"><i class="brand-mark">↑</i>StockPilot</div><h1>Stokun, sifarişin və qazancın <em>bir yerdə.</em></h1><p>Öz hesabını yarat, şəxsi iş sahəndə məhsullarını izləyib sifarişlərini istənilən cihazdan idarə et.</p><div class="benefits"><span>Şəxsi hesab</span><span>Bulud yaddaşı</span><span>Excel hesabatı</span></div></div><aside class="auth-side"><div class="auth-card"><div class="switcher"><button data-form="login" class="active">Giriş</button><button data-form="register">Qeydiyyat</button></div><div class="form-wrap"><form id="loginForm" class="form active"><h2>Yenidən xoş gəldin</h2><p>Username və 4 rəqəmli şifrənlə daxil ol.</p><div class="field"><label>Username</label><input name="username" required autocomplete="username"></div><div class="field"><label>4 rəqəmli şifrə</label><input name="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" required type="password"></div><small class="msg"></small><button class="primary">Daxil ol</button></form><form id="registerForm" class="form"><h2>Yeni hesab yarat</h2><p>Şəxsi StockPilot sahən burada başlayır.</p><div class="two"><div class="field"><label>Ad</label><input name="firstName" required></div><div class="field"><label>Soyad</label><input name="lastName" required></div></div><div class="field"><label>Username</label><input name="username" required pattern="[A-Za-z0-9_.-]{3,30}"></div><div class="field"><label>Profil şəkli</label><label class="photo-label">▧ Şəkil seç <input type="file" name="photo" accept="image/png,image/jpeg,image/webp"></label><small class="optional">İstəyə bağlıdır</small></div><div class="two"><div class="field"><label>4 rəqəmli şifrə</label><input name="password" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" required></div><div class="field"><label>Şifrə təkrarı</label><input name="confirm" type="password" inputmode="numeric" pattern="[0-9]{4}" maxlength="4" required></div></div><small class="msg"></small><button class="primary">Hesab yarat</button></form></div></div></aside></section><script src="js/auth.js"></script></body></html>
+<!doctype html>
+<html lang="az">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#080b07" />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="192x192"
+      href="stockpilot-192.png"
+    />
+    <link rel="apple-touch-icon" href="stockpilot-192.png" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <title>StockPilot</title>
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <section class="auth-shell">
+      <div class="hero">
+        <div class="brand"><i class="brand-mark">↑</i>StockPilot</div>
+        <h1>Stokun, sifarişin və qazancın <em>bir yerdə.</em></h1>
+        <p>
+          Öz hesabını yarat, şəxsi iş sahəndə məhsullarını izləyib sifarişlərini
+          istənilən cihazdan idarə et.
+        </p>
+        <div class="benefits">
+          <span>Şəxsi hesab</span><span>Bulud yaddaşı</span
+          ><span>Excel hesabatı</span>
+        </div>
+      </div>
+      <aside class="auth-side">
+        <div class="auth-card">
+          <div class="switcher">
+            <button data-form="login" class="active">Giriş</button
+            ><button data-form="register">Qeydiyyat</button>
+          </div>
+          <div class="form-wrap">
+            <form id="loginForm" class="form active">
+              <h2>Yenidən xoş gəldin</h2>
+              <p>Username və 4 rəqəmli şifrənlə daxil ol.</p>
+              <div class="field">
+                <label>Username</label
+                ><input name="username" required autocomplete="username" />
+              </div>
+              <div class="field">
+                <label>4 rəqəmli şifrə</label
+                ><input
+                  name="password"
+                  inputmode="numeric"
+                  pattern="[0-9]{4}"
+                  maxlength="4"
+                  required
+                  type="password"
+                />
+              </div>
+              <small class="msg"></small
+              ><button class="primary">Daxil ol</button>
+            </form>
+            <form id="registerForm" class="form">
+              <h2>Yeni hesab yarat</h2>
+              <p>Şəxsi StockPilot sahən burada başlayır.</p>
+              <div class="two">
+                <div class="field">
+                  <label>Ad</label><input name="firstName" required />
+                </div>
+                <div class="field">
+                  <label>Soyad</label><input name="lastName" required />
+                </div>
+              </div>
+              <div class="field">
+                <label>Username</label
+                ><input
+                  name="username"
+                  required
+                  pattern="[A-Za-z0-9_.-]{3,30}"
+                />
+              </div>
+              <div class="field">
+                <label>Profil şəkli</label
+                ><label class="photo-label"
+                  >▧ Şəkil seç
+                  <input
+                    type="file"
+                    name="photo"
+                    accept="image/png,image/jpeg,image/webp" /></label
+                ><small class="optional">İstəyə bağlıdır</small>
+              </div>
+              <div class="two">
+                <div class="field">
+                  <label>4 rəqəmli şifrə</label
+                  ><input
+                    name="password"
+                    type="password"
+                    inputmode="numeric"
+                    pattern="[0-9]{4}"
+                    maxlength="4"
+                    required
+                  />
+                </div>
+                <div class="field">
+                  <label>Şifrə təkrarı</label
+                  ><input
+                    name="confirm"
+                    type="password"
+                    inputmode="numeric"
+                    pattern="[0-9]{4}"
+                    maxlength="4"
+                    required
+                  />
+                </div>
+              </div>
+              <small class="msg"></small
+              ><button class="primary">Hesab yarat</button>
+            </form>
+          </div>
+        </div>
+      </aside>
+    </section>
+    <script src="auth.js"></script>
+  </body>
+</html>

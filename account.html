@@ -1,1 +1,48 @@
-<!doctype html><html lang="az"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#080b07"><link rel="icon" type="image/png" sizes="192x192" href="assets/icons/stockpilot-192.png"><link rel="apple-touch-icon" href="assets/icons/stockpilot-192.png"><link rel="manifest" href="manifest.webmanifest"><title>Hesab və statistika — StockPilot</title><link rel="stylesheet" href="css/app.css"></head><body><div class="dash"><aside class="side"><div class="brand"><i class="brand-mark">↑</i>StockPilot</div><nav><a href="dashboard.html"><span class="nav-icon icon-orders"></span>Sifarişlər</a><a class="active" href="account.html"><span class="nav-icon icon-stats"></span>Hesab və statistika</a><a href="#" id="logout"><span class="nav-icon icon-exit"></span>Çıxış</a></nav></aside><main class="main"><header class="top"><span>İdarəetmə paneli / Hesab</span><div id="user" class="user"></div></header><section class="page-title"><h1>Statistika</h1><p>Gün, həftə, ay və il üzrə satış göstəriciləri.</p></section><section id="stats" class="stats"></section><section id="chart" class="card chart"></section><section id="detail" class="card" style="margin-top:15px"></section></main></div><script src="js/dashboard.js"></script></body></html>
+<!doctype html>
+<html lang="az">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#080b07" />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="192x192"
+      href="stockpilot-192.png"
+    />
+    <link rel="apple-touch-icon" href="stockpilot-192.png" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <title>Hesab və statistika — StockPilot</title>
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <div class="dash">
+      <aside class="side">
+        <div class="brand"><i class="brand-mark">↑</i>StockPilot</div>
+        <nav>
+          <a href="dashboard.html"
+            ><span class="nav-icon icon-orders"></span>Sifarişlər</a
+          ><a class="active" href="account.html"
+            ><span class="nav-icon icon-stats"></span>Hesab və statistika</a
+          ><a href="#" id="logout"
+            ><span class="nav-icon icon-exit"></span>Çıxış</a
+          >
+        </nav>
+      </aside>
+      <main class="main">
+        <header class="top">
+          <span>İdarəetmə paneli / Hesab</span>
+          <div id="user" class="user"></div>
+        </header>
+        <section class="page-title">
+          <h1>Statistika</h1>
+          <p>Gün, həftə, ay və il üzrə satış göstəriciləri.</p>
+        </section>
+        <section id="stats" class="stats"></section>
+        <section id="chart" class="card chart"></section>
+        <section id="detail" class="card" style="margin-top: 15px"></section>
+      </main>
+    </div>
+    <script src="dashboard.js"></script>
+  </body>
+</html>

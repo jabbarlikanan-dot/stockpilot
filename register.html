@@ -1,1 +1,80 @@
-<!doctype html><html lang="az"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#080b07"><link rel="icon" type="image/png" sizes="192x192" href="assets/icons/stockpilot-192.png"><link rel="apple-touch-icon" href="assets/icons/stockpilot-192.png"><link rel="manifest" href="manifest.webmanifest"><title>Qeydiyyat — StockPilot</title><link rel="stylesheet" href="css/app.css"></head><body><section class="auth-shell"><div class="hero"><div class="brand"><i class="brand-mark">↑</i>StockPilot</div><h1>Öz iş sahəni <em>yarat.</em></h1><p>Hər məhsul və sifariş yalnız sənin hesabına aid olacaq.</p></div><aside class="auth-side"><div class="auth-card"><form id="registerForm" class="form active"><h2>Qeydiyyat</h2><p>4 rəqəmli şifrə ilə hesab yarat.</p><div class="two"><div class="field"><label>Ad</label><input name="firstName" required></div><div class="field"><label>Soyad</label><input name="lastName" required></div></div><div class="field"><label>Username</label><input name="username" required></div><div class="field"><label>Profil şəkli</label><label class="photo-label">▧ Şəkil seç <input type="file" name="photo"></label><small class="optional">İstəyə bağlıdır</small></div><div class="two"><div class="field"><label>Şifrə</label><input name="password" type="password" inputmode="numeric" maxlength="4" required></div><div class="field"><label>Təkrar</label><input name="confirm" type="password" inputmode="numeric" maxlength="4" required></div></div><small class="msg"></small><button class="primary">Hesab yarat</button><p style="margin-top:15px"><a href="index.html">Ana səhifəyə qayıt</a></p></form></div></aside></section><script src="js/auth.js"></script></body></html>
+<!doctype html>
+<html lang="az">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#080b07" />
+    <link
+      rel="icon"
+      type="image/png"
+      sizes="192x192"
+      href="stockpilot-192.png"
+    />
+    <link rel="apple-touch-icon" href="stockpilot-192.png" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <title>Qeydiyyat — StockPilot</title>
+    <link rel="stylesheet" href="app.css" />
+  </head>
+  <body>
+    <section class="auth-shell">
+      <div class="hero">
+        <div class="brand"><i class="brand-mark">↑</i>StockPilot</div>
+        <h1>Öz iş sahəni <em>yarat.</em></h1>
+        <p>Hər məhsul və sifariş yalnız sənin hesabına aid olacaq.</p>
+      </div>
+      <aside class="auth-side">
+        <div class="auth-card">
+          <form id="registerForm" class="form active">
+            <h2>Qeydiyyat</h2>
+            <p>4 rəqəmli şifrə ilə hesab yarat.</p>
+            <div class="two">
+              <div class="field">
+                <label>Ad</label><input name="firstName" required />
+              </div>
+              <div class="field">
+                <label>Soyad</label><input name="lastName" required />
+              </div>
+            </div>
+            <div class="field">
+              <label>Username</label><input name="username" required />
+            </div>
+            <div class="field">
+              <label>Profil şəkli</label
+              ><label class="photo-label"
+                >▧ Şəkil seç <input type="file" name="photo" /></label
+              ><small class="optional">İstəyə bağlıdır</small>
+            </div>
+            <div class="two">
+              <div class="field">
+                <label>Şifrə</label
+                ><input
+                  name="password"
+                  type="password"
+                  inputmode="numeric"
+                  maxlength="4"
+                  required
+                />
+              </div>
+              <div class="field">
+                <label>Təkrar</label
+                ><input
+                  name="confirm"
+                  type="password"
+                  inputmode="numeric"
+                  maxlength="4"
+                  required
+                />
+              </div>
+            </div>
+            <small class="msg"></small
+            ><button class="primary">Hesab yarat</button>
+            <p style="margin-top: 15px">
+              <a href="index.html">Ana səhifəyə qayıt</a>
+            </p>
+          </form>
+        </div>
+      </aside>
+    </section>
+    <script src="auth.js"></script>
+  </body>
+</html>

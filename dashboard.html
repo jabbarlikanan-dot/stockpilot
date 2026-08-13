@@ -1,22 +1,66 @@
 <!doctype html>
 <html lang="az">
-<head>
-  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <meta name="theme-color" content="#080b07"><link rel="icon" type="image/png" href="assets/icons/stockpilot-192.png">
-  <link rel="apple-touch-icon" href="assets/icons/stockpilot-192.png"><link rel="manifest" href="manifest.webmanifest">
-  <title>Sifarişlər — StockPilot</title><link rel="stylesheet" href="css/orders.css">
-  <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
-</head>
-<body>
-  <div class="shell">
-    <aside class="sidebar"><div class="logo"><i class="brand-mark">↑</i>StockPilot</div><span class="nav-title">İdarəetmə</span>
-      <nav><button class="active"><span class="nav-icon icon-orders"></span>Sifarişlər</button><button id="openStats"><span class="nav-icon icon-stats"></span>Ümumi statistika</button><button id="openSettings"><span class="nav-icon icon-settings"></span>Ayarlar</button><button id="logout"><span class="nav-icon icon-exit"></span>Çıxış</button></nav><small class="side-note">v2.0 • Şəxsi hesab</small>
-    </aside>
-    <main><header class="topbar"><span><b>İdarəetmə paneli</b> / Sifarişlər</span><div><button id="exportBtn" class="secondary">Excel ixracı</button><button id="profileBtn" class="profile"><b id="profileInitial">U</b><span id="profileName">Hesabım</span></button></div></header>
-      <section class="heading"><div><h1>Sifarişlər</h1><p>Məhsulları, ölkə üzrə karqonu və qazancı bir paneldə idarə et.</p></div><button id="newOrderTop" class="primary">+ Yeni sifariş</button></section>
-      <div id="tabs" class="tabs"></div><section id="content"></section>
-    </main>
-  </div>
-  <div id="modal" class="overlay hidden"><section class="modal"><header><h2 id="modalTitle"></h2><button id="closeModal" class="x">×</button></header><div id="modalBody"></div></section></div>
-  <script src="js/orders-bootstrap.js"></script>
-</body></html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#080b07" />
+    <link rel="icon" type="image/png" href="stockpilot-192.png" />
+    <link rel="apple-touch-icon" href="stockpilot-192.png" />
+    <link rel="manifest" href="manifest.webmanifest" />
+    <title>Sifarişlər — StockPilot</title>
+    <link rel="stylesheet" href="orders.css" />
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js"></script>
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="logo"><i class="brand-mark">↑</i>StockPilot</div>
+        <span class="nav-title">İdarəetmə</span>
+        <nav>
+          <button class="active">
+            <span class="nav-icon icon-orders"></span>Sifarişlər</button
+          ><button id="openStats">
+            <span class="nav-icon icon-stats"></span>Ümumi statistika</button
+          ><button id="openSettings">
+            <span class="nav-icon icon-settings"></span>Ayarlar</button
+          ><button id="logout">
+            <span class="nav-icon icon-exit"></span>Çıxış
+          </button>
+        </nav>
+        <small class="side-note">v2.0 • Şəxsi hesab</small>
+      </aside>
+      <main>
+        <header class="topbar">
+          <span><b>İdarəetmə paneli</b> / Sifarişlər</span>
+          <div>
+            <button id="exportBtn" class="secondary">Excel ixracı</button
+            ><button id="profileBtn" class="profile">
+              <b id="profileInitial">U</b><span id="profileName">Hesabım</span>
+            </button>
+          </div>
+        </header>
+        <section class="heading">
+          <div>
+            <h1>Sifarişlər</h1>
+            <p>
+              Məhsulları, ölkə üzrə karqonu və qazancı bir paneldə idarə et.
+            </p>
+          </div>
+          <button id="newOrderTop" class="primary">+ Yeni sifariş</button>
+        </section>
+        <div id="tabs" class="tabs"></div>
+        <section id="content"></section>
+      </main>
+    </div>
+    <div id="modal" class="overlay hidden">
+      <section class="modal">
+        <header>
+          <h2 id="modalTitle"></h2>
+          <button id="closeModal" class="x">×</button>
+        </header>
+        <div id="modalBody"></div>
+      </section>
+    </div>
+    <script src="orders-bootstrap.js"></script>
+  </body>
+</html>
