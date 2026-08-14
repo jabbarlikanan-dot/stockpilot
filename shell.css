@@ -109,16 +109,33 @@
 .nav-label { overflow: hidden; text-overflow: ellipsis; }
 .sidebar-foot { margin-top: auto; padding: 14px 10px 0; border-top: 1px solid var(--line, #303a29); color: #77836f; font-size: 11px; white-space: nowrap; }
 
-.app-shell.is-sidebar-compact .sidebar-head { justify-content: center; }
+.app-shell.is-sidebar-compact .sidebar-head { display: grid; justify-content: center; gap: 9px; min-height: 82px; }
 .app-shell.is-sidebar-compact .sidebar-brand { width: 34px; overflow: hidden; }
 .app-shell.is-sidebar-compact .brand-logo-full { display: none; }
 .app-shell.is-sidebar-compact .brand-logo-mark { display: block; }
-.app-shell.is-sidebar-compact .sidebar-toggle,
+.app-shell.is-sidebar-compact .sidebar-toggle { display: grid; margin-inline: auto; }
 .app-shell.is-sidebar-compact .nav-caption,
 .app-shell.is-sidebar-compact .nav-label,
 .app-shell.is-sidebar-compact .sidebar-foot { display: none; }
 .app-shell.is-sidebar-compact .app-nav a,
 .app-shell.is-sidebar-compact .app-nav button { justify-content: center; padding-inline: 0; }
+
+.notification-menu { position: relative; display: inline-flex; }
+.notification-button { position: relative; display: grid; width: 40px; height: 40px; place-items: center; padding: 0; border: 1px solid var(--line, #303a29); border-radius: 10px; background: #161d13; color: #d9e2d2; cursor: pointer; }
+.notification-button:hover { border-color: #c6d92c; color: #c6d92c; }
+.notification-button svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.notification-badge { position: absolute; top: -6px; right: -6px; display: grid; min-width: 18px; height: 18px; place-items: center; padding: 0 4px; border: 2px solid #090b08; border-radius: 50px; background: #e85d75; color: #fff; font: 800 10px/1 Arial, sans-serif; }
+.notification-popover { position: absolute; top: calc(100% + 9px); right: 0; z-index: 80; width: min(360px, calc(100vw - 24px)); max-height: 430px; overflow: auto; padding: 8px; border: 1px solid #394333; border-radius: 14px; background: #121710; box-shadow: 0 20px 56px #0009; }
+.notification-popover.hidden { display: none; }
+.notification-popover-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 7px 7px 9px; }
+.notification-popover-head b { color: #f3f6ed; }
+.notification-popover-head button, .notification-all { border: 0; background: transparent; color: #c6d92c; font: 800 12px Arial, sans-serif; cursor: pointer; text-decoration: none; }
+.notification-preview { display: grid; gap: 5px; }
+.notification-item { padding: 10px; border: 1px solid transparent; border-radius: 10px; color: #c7d0c0; }
+.notification-item.unread { border-color: #3a472e; background: #1a2116; }
+.notification-item b, .notification-item small { display: block; }
+.notification-item small { margin-top: 3px; color: #8e9a85; line-height: 1.35; }
+.notification-empty { margin: 10px; color: #8e9a85; font-size: 13px; }
 
 /* Sürətli alt menyu yalnız telefon ölçüsündə görünür. */
 .mobile-bottom { display: none; }

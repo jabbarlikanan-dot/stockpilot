@@ -240,6 +240,8 @@ function bindCustomerOrderActions() {
   document.querySelectorAll("[data-customer-status]").forEach((select) => (select.onchange = async () => {
     const response = await fetch(`/api/customer-orders/${select.dataset.customerStatus}`, { method: "PUT", headers: { "content-type": "application/json", Authorization: `Bearer ${localStorage.stockpilotToken}` }, body: JSON.stringify({ status: select.value }) });
     if (!response.ok) return alert("Status yadda saxlanmadı.");
+    const result = await response.json().catch(() => ({}));
+    if (result.whatsappUrl && confirm("Müştəriyə WhatsApp status mesajı açılsın?")) window.open(result.whatsappUrl, "_blank", "noopener");
     await refreshCustomerOrders();
     hideModal();
     render();

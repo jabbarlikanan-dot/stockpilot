@@ -30,7 +30,7 @@
       <main class="app-main">
         <header class="topbar">
           <span><b>İdarəetmə paneli</b> / Müştəri sifarişləri</span>
-          <div><button id="storeBtn" class="secondary">Mağazam</button><button id="profileBtn" class="profile" title="Profil ayarları"><b id="profileInitial">U</b><span id="profileName">Hesabım</span></button></div>
+          <div><button id="storeBtn" class="secondary">Mağazam</button><div class="notification-menu"><button id="notificationButton" class="notification-button" aria-label="Bildirişlər" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg><b id="notificationBadge" class="notification-badge hidden">0</b></button><section id="notificationPopover" class="notification-popover hidden"><div class="notification-popover-head"><b>Bildirişlər</b><button id="readAllNotifications">Oxundu et</button></div><div id="notificationPreview" class="notification-preview"></div><a id="allNotifications" class="notification-all" href="#">Hamısına bax →</a></section></div><button id="profileBtn" class="profile" title="Profil ayarları"><b id="profileInitial">U</b><span id="profileName">Hesabım</span></button></div>
         </header>
         <section class="heading"><div><h1>Müştəri sifarişləri</h1><p>Mağazadan gələn sifarişləri, statusu və müştəri məlumatlarını idarə edin.</p></div></section>
         <div id="tabs" class="tabs hidden"></div>
@@ -42,5 +42,6 @@
     <div id="undoToast" class="undo-toast hidden"></div>
     <script src="shell.js"></script>
     <script src="orders-bootstrap.js"></script>
+    <script src="notifications.js"></script>
   </body>
 </html>

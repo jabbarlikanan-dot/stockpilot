@@ -86,6 +86,22 @@ const whatsappPhone = (value) => {
   if (digits.startsWith("0")) return `994${digits.slice(1)}`;
   return digits.length <= 9 ? `994${digits}` : digits;
 };
+async function ensureNotifications(e) {
+  await e.DB.prepare("CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, kind TEXT NOT NULL DEFAULT 'info', title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', data_json TEXT, is_read INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run();
+  await e.DB.prepare("CREATE INDEX IF NOT EXISTS idx_notifications_owner ON notifications(owner_user_id, is_read, created_at DESC)").run();
+}
+async function notification(e, ownerId, kind, title, body, data = null) {
+  await ensureNotifications(e);
+  return e.DB.prepare("INSERT INTO notifications(id,owner_user_id,kind,title,body,data_json) VALUES(?,?,?,?,?,?)")
+    .bind(crypto.randomUUID(), ownerId, kind, title, body, data ? JSON.stringify(data) : null)
+    .run();
+}
+const whatsappMessage = (order, status) => {
+  const statusText = whatsappStatuses[status] || "Sifarişiniz yeniləndi.";
+  const productText = (order.cart || []).map((item) => `${item.name} × ${item.quantity}`).join(", ");
+  return `Salam, ${order.customer?.name || "müştəri"}! ${statusText}\nSifariş: ${productText}`;
+};
+const whatsappUrl = (order, status) => `https://wa.me/${whatsappPhone(order.customer?.phone)}?text=${encodeURIComponent(whatsappMessage(order, status))}`;
 async function sendWhatsAppStatus(e, order, status) {
   if (!e.WA_TOKEN || !e.WA_PHONE_NUMBER_ID || !e.WA_TEMPLATE_NAME) return false;
   const to = whatsappPhone(order.customer?.phone);
@@ -217,13 +233,17 @@ export default {
       const products = productList(await readState(e, owner.id));
       const cart = [];
       for (const line of body.cart) {
-        const product = products.find((x) => x.id === line.id && !x.sold);
+        const product = products.find((x) => String(x.id) === String(line.id) && !x.sold);
         const quantity = Math.max(1, Number(line.quantity) || 1);
         if (!product || quantity > product.quantity) return fail("Məhsul stokda yoxdur.", 409);
         cart.push({ ...product, quantity });
       }
-      const order = { id: crypto.randomUUID(), customer: { name, phone, note: String(body.note || "").slice(0, 500), delivery: String(body.delivery || "metro"), metro: String(body.metro || ""), address: String(body.address || ""), payment: String(body.payment || "cash"), preferredAt: String(body.preferredAt || "").slice(0, 40) }, cart, total: cart.reduce((s, x) => s + x.price * x.quantity, 0), createdAt: new Date().toISOString() };
+      const preferredAt = String(body.preferredAt || "").slice(0, 40);
+      if (!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::\d{2})?$/.test(preferredAt)) return fail("Çatdırılma tarix və saatını 24 saat formatında yazın.");
+      if (preferredAt.slice(0, 10) < new Date().toISOString().slice(0, 10)) return fail("Keçmiş tarix seçilə bilməz.");
+      const order = { id: crypto.randomUUID(), customer: { name, phone, note: String(body.note || "").slice(0, 500), delivery: String(body.delivery || "metro"), metro: String(body.metro || ""), address: String(body.address || ""), payment: String(body.payment || "cash"), preferredAt }, cart, total: cart.reduce((s, x) => s + x.price * x.quantity, 0), createdAt: new Date().toISOString() };
       await e.DB.prepare("INSERT INTO customer_orders(id,owner_user_id,order_json,status) VALUES(?,?,?,?)").bind(order.id, owner.id, JSON.stringify(order), "new").run();
+      await notification(e, owner.id, "customer-order", "Yeni müştəri sifarişi", `${name} · ${order.total.toFixed(2)} ₼`, { orderId: order.id });
       return json({ ok: true, orderId: order.id }, 201);
     }
     const user = await who(r, e);
@@ -294,6 +314,37 @@ export default {
       const rows = await e.DB.prepare("SELECT id,order_json,status,created_at,updated_at FROM customer_orders WHERE owner_user_id=? ORDER BY created_at DESC").bind(user.id).all();
       return json({ orders: (rows.results || []).map((row) => ({ ...JSON.parse(row.order_json), status: row.status, createdAt: row.created_at, updatedAt: row.updated_at })) });
     }
+    if (p === "/api/notifications" && r.method === "GET") {
+      if (!user) return fail("Giriş tələb olunur.", 401);
+      await ensureNotifications(e);
+      const rows = await e.DB.prepare("SELECT id,kind,title,body,data_json,is_read,created_at FROM notifications WHERE owner_user_id=? ORDER BY created_at DESC LIMIT 100").bind(user.id).all();
+      return json({ notifications: (rows.results || []).map((row) => ({ id: row.id, kind: row.kind, title: row.title, body: row.body, data: row.data_json ? JSON.parse(row.data_json) : null, read: Boolean(row.is_read), createdAt: row.created_at })) });
+    }
+    if (p === "/api/notifications" && r.method === "POST") {
+      if (!user) return fail("Giriş tələb olunur.", 401);
+      const body = await r.json();
+      const username = String(body.username || "").trim();
+      const title = String(body.title || "Bildiriş").trim().slice(0, 100);
+      const message = String(body.message || "").trim().slice(0, 500);
+      if (!username || !message) return fail("Username və bildiriş mətni tələb olunur.");
+      const recipient = await e.DB.prepare("SELECT id FROM users WHERE username=?").bind(username).first();
+      if (!recipient) return fail("Bu username ilə istifadəçi tapılmadı.", 404);
+      await notification(e, recipient.id, "message", title, message, { from: user.username });
+      return json({ ok: true });
+    }
+    if (p === "/api/notifications/read-all" && r.method === "POST") {
+      if (!user) return fail("Giriş tələb olunur.", 401);
+      await ensureNotifications(e);
+      await e.DB.prepare("UPDATE notifications SET is_read=1 WHERE owner_user_id=?").bind(user.id).run();
+      return json({ ok: true });
+    }
+    const notificationMatch = p.match(/^\/api\/notifications\/([\w-]+)\/read$/);
+    if (notificationMatch && r.method === "POST") {
+      if (!user) return fail("Giriş tələb olunur.", 401);
+      await ensureNotifications(e);
+      await e.DB.prepare("UPDATE notifications SET is_read=1 WHERE id=? AND owner_user_id=?").bind(notificationMatch[1], user.id).run();
+      return json({ ok: true });
+    }
     const customerMatch = p.match(/^\/api\/customer-orders\/([\w-]+)$/);
     if (customerMatch && r.method === "DELETE") {
       if (!user) return fail("Giriş tələb olunur.", 401);
@@ -335,7 +386,7 @@ export default {
         for (const line of order.cart || []) {
           for (const ownerOrder of state.orders || []) for (let i = 0; i < (ownerOrder.items || []).length; i++) {
             const item = ownerOrder.items[i], itemId = item.id || `${ownerOrder.id}:${i}`;
-            if (itemId === line.id) {
+            if (String(itemId) === String(line.id)) {
               const deliveredQty = Math.min(Number(item.qty) || 0, Number(line.quantity) || 0);
               if (!deliveredQty) continue;
               item.acquiredQty = Number(item.acquiredQty ?? item.qty) || 0;
@@ -353,7 +404,8 @@ export default {
       }
       await e.DB.prepare("UPDATE customer_orders SET order_json=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND owner_user_id=?").bind(JSON.stringify(order), status, customerMatch[1], user.id).run();
       const messageSent = status !== row.status ? await sendWhatsAppStatus(e, order, status).catch(() => false) : false;
-      return json({ ok: true, messageSent, order: { ...order, status } });
+      if (status !== row.status) await notification(e, user.id, "order-status", `Sifariş statusu: ${whatsappStatuses[status] || status}`, `${order.customer?.name || "Müştəri"} · ${order.total?.toFixed?.(2) || order.total || 0} ₼`, { orderId: customerMatch[1], status });
+      return json({ ok: true, messageSent, whatsappUrl: whatsappUrl(order, status), order: { ...order, status } });
     }
     return e.ASSETS.fetch(r);
   },
