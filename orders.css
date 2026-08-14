@@ -465,6 +465,21 @@ select:focus {
   color: var(--lime);
   padding: 7px;
 }
+.status-complete {
+  display: inline-block;
+  color: var(--lime);
+  font-size: 12px;
+  font-weight: 800;
+  padding: 7px 2px;
+}
+.undo-sale {
+  display: block;
+  margin-top: 6px;
+  padding: 6px 7px;
+  font-size: 11px;
+  color: #dce7ce;
+  background: #20291c;
+}
 .empty {
   text-align: center;
   color: #9aa694;

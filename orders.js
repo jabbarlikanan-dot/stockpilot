@@ -171,17 +171,67 @@ function calc(i) {
     pct: sales ? (sales - purchase) / sales : 0,
   };
 }
+// acquiredQty is the original stock. qty is always the currently remaining stock.
+// These helpers also preserve compatibility with older all-or-nothing sold records.
+function acquiredQty(i) {
+  return Math.max(0, Number(i.acquiredQty ?? i.qty) || 0);
+}
+function soldQty(i) {
+  const acquired = acquiredQty(i);
+  const stored = Number(i.soldQty);
+  return Math.min(acquired, Math.max(0, Number.isFinite(stored) ? stored : i.sold ? acquired : 0));
+}
+function remainingQty(i) {
+  const acquired = acquiredQty(i);
+  const left = Number(i.qty);
+  return Math.min(acquired - soldQty(i), Math.max(0, Number.isFinite(left) ? left : acquired - soldQty(i)));
+}
+function soldEvents(i) {
+  if (Array.isArray(i.saleEvents)) return i.saleEvents;
+  return i.soldAt && soldQty(i) ? [{ qty: soldQty(i), soldAt: i.soldAt }] : [];
+}
+function soldSummary(i, qty = soldQty(i)) {
+  const acquired = acquiredQty(i);
+  const x = calc(i);
+  const count = Math.min(acquired, Math.max(0, Number(qty) || 0));
+  const purchase = acquired ? x.purchase * (count / acquired) : 0;
+  const sales = (Number(i.sale) || 0) * count;
+  return { purchase, sales, profit: sales - purchase, pct: sales ? (sales - purchase) / sales : 0 };
+}
+function addSale(i, qty) {
+  const count = Math.min(remainingQty(i), Math.max(0, Number(qty) || 0));
+  if (!count) return false;
+  const now = new Date().toISOString();
+  i.acquiredQty = acquiredQty(i);
+  i.qty = remainingQty(i) - count;
+  i.soldQty = soldQty(i) + count;
+  i.saleEvents = [...soldEvents(i), { qty: count, soldAt: now }];
+  i.sold = i.qty === 0;
+  i.soldAt = i.sold ? now : null;
+  return true;
+}
+function undoLastSale(i) {
+  const events = [...soldEvents(i)];
+  const last = events.pop();
+  if (!last) return false;
+  const count = Math.min(soldQty(i), Math.max(0, Number(last.qty) || 0));
+  i.qty = Math.min(acquiredQty(i), remainingQty(i) + count);
+  i.soldQty = Math.max(0, soldQty(i) - count);
+  i.saleEvents = events;
+  i.sold = i.qty === 0;
+  i.soldAt = i.sold ? events.at(-1)?.soldAt || null : null;
+  return true;
+}
 function totals(o) {
   const total = (o.items || []).reduce(
     (a, i) => {
       const x = calc(i);
       a.purchase += x.purchase;
-      a.items += +i.qty || 0;
-      if (i.sold) {
-        a.sales += x.sales;
-        a.profit += x.profit;
-        a.sold += +i.qty || 0;
-      }
+      a.items += acquiredQty(i);
+      const sold = soldSummary(i);
+      a.sales += sold.sales;
+      a.profit += sold.profit;
+      a.sold += soldQty(i);
       return a;
     },
     { purchase: 0, sales: 0, profit: 0, items: 0, sold: 0 },
@@ -334,10 +384,10 @@ function tabs() {
   $("newOrder").onclick = newOrder;
 }
 function productDetail(item) {
-  const x = calc(item);
+  const x = calc(item), sold = soldSummary(item), left = remainingQty(item);
   showModal(
     item.name,
-    `<div class="detail-card">${item.img ? `<img class="thumb" src="${item.img}">` : '<div class="noimg">Şəkil<br>yoxdur</div>'}<div><p class="category">${esc(item.category || "Digər")} · ${x.c.name}</p><div class="detail-grid"><div>Say<b>${item.qty} ədəd</b></div><div>Çəki<b>${item.weight || 0} qr</b></div><div>Ümumi alış<b>${money(x.purchase)} ₼</b></div><div>Gözlənən qazanc<b class="lime">${money(x.profit)} ₼</b></div><div>Status<b>${item.sold ? `Satılıb — ${dateTime(item.soldAt)}` : "Satılmayıb"}</b></div><div>Karqo<b>${money(x.ship * x.c.rate)} ₼</b></div></div></div></div>`,
+    `<div class="detail-card">${item.img ? `<img class="thumb" src="${item.img}">` : '<div class="noimg">Şəkil<br>yoxdur</div>'}<div><p class="category">${esc(item.category || "Digər")} · ${x.c.name}</p><div class="detail-grid"><div>Stokda qalan<b>${left} ədəd</b></div><div>Satılan<b>${soldQty(item)} ədəd</b></div><div>Çəki<b>${item.weight || 0} qr</b></div><div>Ümumi alış<b>${money(x.purchase)} ₼</b></div><div>Reallaşan qazanc<b class="lime">${money(sold.profit)} ₼</b></div><div>Karqo<b>${money(x.ship * x.c.rate)} ₼</b></div></div></div></div>`,
   );
 }
 function countryOptions(selected) {
@@ -359,7 +409,7 @@ function visibleItems(o) {
           `${item.name} ${item.category || ""}`
             .toLocaleLowerCase("az")
             .includes(q)) &&
-        (status === "all" || (status === "sold" ? item.sold : !item.sold)),
+        (status === "all" || (status === "sold" ? soldQty(item) > 0 : remainingQty(item) > 0)),
     );
 }
 function undoBox() {
@@ -476,13 +526,15 @@ function render() {
     spent = Math.max(0, t.purchase - t.sales),
     used = o.budget ? Math.min(100, (spent / +o.budget) * 100) : 0,
     today = new Date().toDateString(),
-    todaySold = (o.items || []).filter(
-      (i) => i.sold && i.soldAt && new Date(i.soldAt).toDateString() === today,
+    todaySold = (o.items || []).flatMap((i) =>
+      soldEvents(i)
+        .filter((event) => event.soldAt && new Date(event.soldAt).toDateString() === today)
+        .map((event) => ({ item: i, qty: Number(event.qty) || 0 })),
     ),
     todayCustomerSales = (state.customerSales || []).filter(
       (sale) => sale.orderId === o.id && sale.soldAt && new Date(sale.soldAt).toDateString() === today,
     ),
-    todayValue = todaySold.reduce((s, i) => s + calc(i).sales, 0) + todayCustomerSales.reduce((sum, sale) => sum + (Number(sale.sales) || 0), 0),
+    todayValue = todaySold.reduce((s, sale) => s + soldSummary(sale.item, sale.qty).sales, 0) + todayCustomerSales.reduce((sum, sale) => sum + (Number(sale.sales) || 0), 0),
     rows = visibleItems(o);
   $("content").innerHTML =
     `<section class="box orderbar"><div class="field name"><label>Sifarişin adı</label><input id="orderName" value="${esc(o.name)}"></div><div class="field"><label>Yaradılma tarixi</label><input readonly value="${dateTime(o.createdAt)}"></div><div class="field"><label>Büdcə (₼)</label><input id="budget" type="number" min="0" value="${o.budget || 0}"></div><div class="field"><label>Qısa qeyd</label><input id="orderNote" maxlength="80" value="${esc(o.note || "")}" placeholder="Məsələn: Avqust malları"></div><button id="archiveOrder" class="secondary">${o.archived ? "Arxivdən çıxar" : "Arxivlə"}</button><button id="deleteOrder" class="danger">Sifarişi sil</button></section><section class="box tools"><input id="search" value="${esc(state.ui.search)}" placeholder="Məhsul adında axtarış…"><select id="statusFilter"><option value="all">Bütün məhsullar</option><option value="sold" ${state.ui.status === "sold" ? "selected" : ""}>Satılanlar</option><option value="unsold" ${state.ui.status === "unsold" ? "selected" : ""}>Satılmayanlar</option></select><select id="orderSort"><option value="newest">Yeni sifarişlər əvvəl</option><option value="oldest" ${state.ui.orderSort === "oldest" ? "selected" : ""}>Köhnə sifarişlər əvvəl</option></select><small>Son yadda saxlanma: ${dateTime(state.ui.lastSavedAt)}</small></section><section class="workspace"><aside class="box form"><h2>${e ? "Məhsulu redaktə et" : "Məhsul əlavə et"}</h2><div class="grid"><div class="field wide"><label>Məhsulun adı</label><input id="name" value="${e ? esc(e.name) : ""}" placeholder="Məsələn: Kreatin"></div><div class="field"><label>Kateqoriya</label><select id="category">${["Əlavələr", "Geyim", "Elektronika", "Kosmetika", "Ev və digər"].map((v) => `<option ${e?.category === v ? "selected" : ""}>${v}</option>`).join("")}</select></div><div class="field"><label>Ölkə</label><select id="productCountry">${countryOptions(e ? e.country : "america")}</select></div><div class="field"><label>Say</label><div class="qty-control"><button type="button" id="qtyMinus">−</button><input id="qty" type="number" min="1" value="${e ? e.qty : 1}"><button type="button" id="qtyPlus">+</button></div></div><div class="field"><label>Minimum stok</label><input id="minStock" type="number" min="0" value="${e?.minStock ?? 3}"></div><div class="field"><label>Alış qiyməti</label><input id="price" type="number" min="0" step=".01" value="${e ? e.price : 0}"></div><div class="field"><label>Satış qiyməti (₼)</label><input id="sale" type="number" min="0" step=".01" value="${e ? e.sale : 0}"></div><div class="field wide"><label>Çəki (qram, ümumi)</label><input id="weight" type="number" min="0" value="${e ? e.weight : 0}"></div><div class="field wide"><label>Məhsul şəkli</label><input id="image" class="file" type="file" accept="image/png,image/jpeg,image/webp">${e && pendingImage ? '<button id="deleteImage" class="remove" style="margin-top:8px">Şəkli sil</button>' : ""}</div></div><p class="hint">Seçilən ölkənin tarifi və məzənnəsi avtomatik tətbiq olunur.</p><button id="saveItem" class="primary save">${e ? "Dəyişiklikləri yadda saxla" : "Listə əlavə et"}</button>${e ? '<button id="cancelEdit" class="secondary save">Ləğv et</button>' : ""}</aside><section class="box tablebox"><div class="scroll"><table class="items"><thead><tr><th>Şəkil</th><th>Məhsul / kateqoriya</th><th>Ölkə</th><th>Say</th><th>Alış</th><th>Karqo</th><th>Ümumi alış</th><th>Satış</th><th>Qazanc</th><th>Faiz</th><th>Status</th><th>Əməliyyat</th></tr></thead><tbody>${
@@ -490,15 +542,18 @@ function render() {
         ? rows
             .map(({ item: i, index: n }) => {
               const x = calc(i),
+                sold = soldSummary(i),
+                left = remainingQty(i),
+                soldCount = soldQty(i),
                 im = i.img
                   ? `<img class="thumb" src="${i.img}">`
                   : '<div class="noimg">Şəkil<br>yoxdur</div>';
-              const isLow = !i.sold && (+i.qty || 0) <= (+i.minStock || 3);
-              return `<tr><td>${im}</td><td><button class="fav ${i.favorite ? "active" : ""}" data-fav="${n}" title="Favorit">★</button><button class="product-link" data-detail="${n}"><b>${esc(i.name)}</b></button><small class="category">${esc(i.category || "Digər")}</small>${isLow ? '<small class="stock-low">Stok azalır</small>' : ""}</td><td>${x.c.name}</td><td class="num">${i.qty}</td><td class="num">${money((+i.price || 0) * (+i.qty || 0) * x.c.rate)} ₼</td><td class="num">${money(x.ship * x.c.rate)} ₼<br><small>${range(i.weight)}</small></td><td class="num">${money(x.purchase)} ₼</td><td class="num">${money(x.sales)} ₼</td><td class="num lime">${money(x.profit)} ₼</td><td class="num">${(x.pct * 100).toFixed(1)}%</td><td><button class="sold" data-sold="${n}">${i.sold ? `Satılıb<br><small>${dateTime(i.soldAt)}</small>` : "Satıldı et"}</button></td><td><button class="edit" data-edit="${n}">Redaktə</button><button class="remove" data-remove="${n}">Sil</button></td></tr>`;
+              const isLow = left > 0 && left <= (+i.minStock || 3);
+              return `<tr><td>${im}</td><td><button class="fav ${i.favorite ? "active" : ""}" data-fav="${n}" title="Favorit">★</button><button class="product-link" data-detail="${n}"><b>${esc(i.name)}</b></button><small class="category">${esc(i.category || "Digər")}</small>${isLow ? '<small class="stock-low">Stok azalır</small>' : ""}</td><td>${x.c.name}</td><td class="num"><b>${left}</b><br><small>${soldCount} satılıb</small></td><td class="num">${money((+i.price || 0) * acquiredQty(i) * x.c.rate)} ₼</td><td class="num">${money(x.ship * x.c.rate)} ₼<br><small>${range(i.weight)}</small></td><td class="num">${money(x.purchase)} ₼</td><td class="num">${money(sold.sales)} ₼</td><td class="num lime">${money(sold.profit)} ₼</td><td class="num">${(sold.pct * 100).toFixed(1)}%</td><td>${left ? `<button class="sold" data-sold="${n}">+ Satış əlavə et</button>` : '<span class="status-complete">Hamısı satılıb</span>'}${soldCount ? `<button class="undo-sale" data-undo-sale="${n}">Son satışı geri al</button>` : ""}</td><td><button class="edit" data-edit="${n}">Redaktə</button><button class="remove" data-remove="${n}">Sil</button></td></tr>`;
             })
             .join("")
         : '<tr><td colspan="12" class="empty">Bu filterdə məhsul yoxdur.</td></tr>'
-    }</tbody></table></div></section></section><section class="metrics"><div class="box metric"><span>Ümumi alış</span><strong>${money(t.purchase)} ₼</strong></div><div class="box metric"><span>Bu gün satılanlar</span><strong>${todaySold.reduce((s, i) => s + (Number(i.acquiredQty ?? i.qty) || 0), 0) + todayCustomerSales.reduce((sum, sale) => sum + (Number(sale.quantity) || 0), 0)} ədəd</strong><small>${money(todayValue)} ₼ satış</small></div><div class="box metric"><span>Satış qazancı</span><strong class="lime">${money(t.profit)} ₼</strong></div><div class="box metric budget-card"><span>Büdcə: xərcləndi / qaldı</span><strong>${money(spent)} ₼ / ${money(Math.max(0, remain))} ₼</strong><div class="progress"><i style="width:${used}%"></i></div><small>${used.toFixed(1)}% xərclənib</small></div></section>`;
+    }</tbody></table></div></section></section><section class="metrics"><div class="box metric"><span>Ümumi alış</span><strong>${money(t.purchase)} ₼</strong></div><div class="box metric"><span>Bu gün satılanlar</span><strong>${todaySold.reduce((sum, sale) => sum + sale.qty, 0) + todayCustomerSales.reduce((sum, sale) => sum + (Number(sale.quantity) || 0), 0)} ədəd</strong><small>${money(todayValue)} ₼ satış</small></div><div class="box metric"><span>Satış qazancı</span><strong class="lime">${money(t.profit)} ₼</strong></div><div class="box metric budget-card"><span>Büdcə: xərcləndi / qaldı</span><strong>${money(spent)} ₼ / ${money(Math.max(0, remain))} ₼</strong><div class="progress"><i style="width:${used}%"></i></div><small>${used.toFixed(1)}% xərclənib</small></div></section>`;
   compactPanels(o);
   bind(o, e);
   undoBox();
@@ -564,20 +619,29 @@ function bind(o, e) {
       render();
     };
   $("saveItem").onclick = () => {
+    const requestedQty = +$("qty").value || 0;
+    const adjustedAcquiredQty = e
+      ? Math.max(
+          soldQty(e) + requestedQty,
+          acquiredQty(e) + requestedQty - remainingQty(e),
+        )
+      : requestedQty;
     const i = {
       id: e?.id || crypto.randomUUID(),
       name: $("name").value.trim(),
       category: $("category").value,
       country: $("productCountry").value,
-      qty: +$("qty").value || 0,
-      acquiredQty: e ? Number(e.acquiredQty ?? e.qty) || 0 : +$("qty").value || 0,
+      qty: requestedQty,
+      acquiredQty: adjustedAcquiredQty,
       minStock: +$("minStock").value || 0,
       price: +$("price").value || 0,
       sale: +$("sale").value || 0,
       weight: +$("weight").value || 0,
       img: pendingImage,
       favorite: e?.favorite || false,
-      sold: e ? e.sold : false,
+      soldQty: e ? soldQty(e) : 0,
+      saleEvents: e ? soldEvents(e) : [],
+      sold: e ? Boolean(e.sold) : false,
       soldAt: e?.soldAt || null,
     };
     if (!i.name || !i.qty) return alert("Məhsulun adını və sayını yazın.");
@@ -621,12 +685,22 @@ function bind(o, e) {
     (b) =>
       (b.onclick = () => {
         const i = o.items[+b.dataset.sold];
-        i.sold = !i.sold;
-        i.soldAt = i.sold ? new Date().toISOString() : null;
-        i.acquiredQty = Number(i.acquiredQty ?? i.qty) || 0;
-        i.qty = i.sold ? 0 : i.acquiredQty;
+        const count = Number(prompt(`Neçə ədəd satıldı? Stokda ${remainingQty(i)} ədəd var.`, "1"));
+        if (!Number.isFinite(count) || count <= 0) return;
+        if (count > remainingQty(i)) return alert(`Stokda yalnız ${remainingQty(i)} ədəd qalıb.`);
+        addSale(i, count);
         save();
         render();
+      }),
+  );
+  document.querySelectorAll("[data-undo-sale]").forEach(
+    (b) =>
+      (b.onclick = () => {
+        const i = o.items[+b.dataset.undoSale];
+        if (undoLastSale(i)) {
+          save();
+          render();
+        }
       }),
   );
   if ($("customerHistory")) $("customerHistory").onclick = customerHistory;

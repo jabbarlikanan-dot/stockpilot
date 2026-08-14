@@ -48,8 +48,12 @@ function drawStats(state) {
   const now = new Date(),
     weekStart = startOfWeek(now),
     items = (state.orders || [])
-      .flatMap((order) => order.items || [])
-      .filter((item) => item.sold)
+      .flatMap((order) => (order.items || []).flatMap((item) => {
+        const acquired = Math.max(0, Number(item.acquiredQty ?? item.qty) || 0);
+        const soldQty = Math.min(acquired, Math.max(0, Number.isFinite(Number(item.soldQty)) ? Number(item.soldQty) : item.sold ? acquired : 0));
+        const events = Array.isArray(item.saleEvents) ? item.saleEvents : item.soldAt && soldQty ? [{ qty: soldQty, soldAt: item.soldAt }] : [];
+        return events.map((event) => ({ ...item, qty: Number(event.qty) || 0, soldAt: event.soldAt, sold: true }));
+      }))
       .concat(
         (state.customerSales || []).map((sale) => ({
           ...sale,
