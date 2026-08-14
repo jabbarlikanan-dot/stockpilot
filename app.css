@@ -70,6 +70,18 @@ button {
   color: #11140b;
   font-style: normal;
 }
+.brand-image {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+}
+.brand-image img {
+  display: block;
+  width: min(170px, 46vw);
+  height: 34px;
+  object-fit: contain;
+  object-position: left center;
+}
 .hero h1 {
   font-size: clamp(40px, 6vw, 75px);
   line-height: 0.98;
