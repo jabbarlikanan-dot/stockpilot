@@ -61,11 +61,16 @@ async function start() {
   if (!token) return logout();
   let state = defaultState;
   try {
-    const me = await api("/api/me");
+    const [me, saved, customer] = await Promise.all([
+      api("/api/me"),
+      api("/api/state"),
+      api("/api/customer-orders"),
+    ]);
     if (!me.ok) return logout();
     currentUser = (await me.json()).user;
-    const saved = await api("/api/state");
+    window.currentUser = currentUser;
     if (saved.ok) state = (await saved.json()).state || defaultState;
+    window.__customerOrders = customer.ok ? (await customer.json()).orders || [] : [];
   } catch {
     return logout();
   }
@@ -83,6 +88,7 @@ async function start() {
   document.getElementById("logout").onclick = logout;
   const orders = document.createElement("script");
   orders.src = "orders.js";
+  orders.async = true;
   orders.onload = () => window.startStockPilot();
   document.body.appendChild(orders);
 }

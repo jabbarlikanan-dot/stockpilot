@@ -1,4 +1,4 @@
-/* Sifarişlər, ölkə tarifləri və Excel ixracı */
+/* Sifarişlər, karqo tarifləri, filter və Excel ixracı */
 const defaults = {
   america: {
     name: "Amerika",
@@ -24,34 +24,79 @@ let state = window.__stockState || {
   orders: [],
   countries: defaults,
 };
+state.countries = { ...defaults, ...(state.countries || {}) };
+state.ui = {
+  search: "",
+  status: "all",
+  orderSort: "newest",
+  showArchived: false,
+  lastSavedAt: null,
+  orderDetailsOpen: false,
+  filtersOpen: false,
+  productFormOpen: false,
+  panel: "personal",
+  customerView: "all",
+  ...(state.ui || {}),
+};
 let pendingImage = "",
-  editing = null;
-const $ = (id) => document.getElementById(id),
-  money = (n) =>
-    (Number(n) || 0).toLocaleString("az-AZ", {
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }),
-  esc = (s) =>
-    String(s || "").replace(
-      /[&<>"']/g,
-      (m) =>
-        ({
-          "&": "&amp;",
-          "<": "&lt;",
-          ">": "&gt;",
-          '"': "&quot;",
-          "'": "&#039;",
-        })[m],
-    );
-const save = () => window.persistStockState(state);
-const active = () => state.orders.find((o) => o.id === state.active);
-function country(k) {
-  return state.countries[k] || state.countries.america;
+  editing = null,
+  lastDeleted = null;
+let xlsxLoader;
+async function loadXlsx() {
+  if (window.XLSX) return window.XLSX;
+  if (!xlsxLoader) {
+    xlsxLoader = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js";
+      script.async = true;
+      script.onload = () => window.XLSX ? resolve(window.XLSX) : reject(new Error("Excel modulu yüklənmədi."));
+      script.onerror = () => reject(new Error("Excel modulu yüklənmədi."));
+      document.head.appendChild(script);
+    });
+  }
+  return xlsxLoader;
 }
-function shipping(g, k) {
+const isCustomerPage =
+  location.pathname.endsWith("customer-orders.html") ||
+  location.pathname.endsWith("customer-orders");
+state.customerOrders = window.__customerOrders || [];
+const $ = (id) => document.getElementById(id);
+const money = (n) =>
+  (Number(n) || 0).toLocaleString("az-AZ", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+const esc = (s) =>
+  String(s || "").replace(
+    /[&<>"']/g,
+    (m) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#039;",
+      })[m],
+  );
+let saveTimer = null;
+const save = (now = false) => {
+  state.ui.lastSavedAt = new Date().toISOString();
+  clearTimeout(saveTimer);
+  const persist = () => window.persistStockState(state);
+  if (now) return persist();
+  saveTimer = setTimeout(persist, 280);
+};
+window.addEventListener("pagehide", () => {
+  if (!saveTimer) return;
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  window.persistStockState(state);
+});
+const active = () => state.orders.find((o) => o.id === state.active);
+const country = (k) => state.countries[k] || state.countries.america;
+const shipping = (g, k) => {
   g = +g || 0;
-  let a = country(k).tariffs;
+  const a = country(k).tariffs;
   return !g
     ? 0
     : g <= 100
@@ -61,10 +106,9 @@ function shipping(g, k) {
         : g <= 500
           ? a[2]
           : Math.ceil(g / 1000) * a[3];
-}
-function range(g) {
-  g = +g || 0;
-  return g <= 100
+};
+const range = (g) =>
+  g <= 100
     ? "0–100 qr"
     : g <= 250
       ? "101–250 qr"
@@ -72,24 +116,50 @@ function range(g) {
         ? "251–500 qr"
         : g <= 1000
           ? "501 qr–1 kq"
-          : Math.ceil(g / 1000) + " kq";
-}
-function newOrder() {
-  let o = {
-    id: Date.now().toString(),
-    name: "Sifariş " + (state.orders.length + 1),
-    budget: 0,
-    createdAt: new Date().toISOString(),
-    items: [],
-  };
-  state.orders.push(o);
-  state.active = o.id;
-  save();
-  render();
+          : `${Math.ceil(g / 1000)} kq`;
+const dateTime = (v) =>
+  v
+    ? new Intl.DateTimeFormat("az-AZ", {
+        dateStyle: "short",
+        timeStyle: "short",
+      }).format(new Date(v))
+    : "—";
+const customerStatus = {
+  new: "Yeni",
+  confirmed: "Təsdiqləndi",
+  preparing: "Hazırlanır",
+  courier: "Kuryerdə",
+  delivered: "Tamamlandı",
+  cancelled: "Ləğv edildi",
+};
+const terminalCustomerStatus = new Set(["delivered", "cancelled"]);
+const phoneForWhatsApp = (value) => {
+  const digits = String(value || "").replace(/\D/g, "");
+  if (digits.startsWith("994")) return digits;
+  if (digits.startsWith("0")) return `994${digits.slice(1)}`;
+  return digits.length <= 9 ? `994${digits}` : digits;
+};
+const whatsappLink = (order) => {
+  const phone = phoneForWhatsApp(order.customer?.phone);
+  const message = `Salam, ${order.customer?.name || ""}! Sifarişinizin statusu: ${customerStatus[order.status] || "Yeni"}. Sifariş: ${(order.cart || []).map((item) => `${item.name} × ${item.quantity}`).join(", ")}.`;
+  return `https://wa.me/${phone}?text=${encodeURIComponent(message)}`;
+};
+function customerOrderCard(order, compact = false) {
+  const statusOptions = Object.entries(customerStatus)
+    .map(([key, label]) => `<option value="${key}" ${order.status === key ? "selected" : ""}>${label}</option>`)
+    .join("");
+  const selectedFromNotification = location.hash === `#order-${order.id}`;
+  return `<article id="order-${esc(order.id)}" class="customer-card ${terminalCustomerStatus.has(order.status) ? "done" : ""} ${selectedFromNotification ? "highlight" : ""}">
+    <div class="customer-card-main"><b>${esc(order.customer?.name)}</b><span>${esc(order.customer?.phone)} · ${money(order.total)} ₼</span>
+    <small>${(order.cart || []).map((item) => `${esc(item.name)} × ${item.quantity}`).join(", ")}${order.customer?.note ? ` — ${esc(order.customer.note)}` : ""}</small>
+    <small>${dateTime(order.createdAt)}${order.customer?.delivery ? ` · ${esc(order.customer.delivery === "metro" ? "Metro təhvil" : "Ünvana çatdırılma")}` : ""}${order.customer?.preferredAt ? ` · İstədiyi vaxt: ${dateTime(order.customer.preferredAt)}` : ""}</small></div>
+    <div class="customer-actions"><select data-customer-status="${order.id}" ${order.status === "delivered" ? "disabled" : ""}>${statusOptions}</select>
+    <button class="edit" data-customer-edit="${order.id}">Redaktə</button><a class="whatsapp" data-customer-whatsapp="${order.id}" href="${whatsappLink(order)}" target="_blank" rel="noopener">WhatsApp</a><button class="remove" data-customer-delete="${order.id}">Sil</button></div>
+  </article>`;
 }
 function calc(i) {
-  let c = country(i.country),
-    q = +i.qty || 0,
+  const c = country(i.country),
+    q = +(i.acquiredQty ?? i.qty) || 0,
     ship = shipping(i.weight, i.country),
     purchase = ((+i.price || 0) * q + ship) * c.rate,
     sales = (+i.sale || 0) * q;
@@ -102,45 +172,214 @@ function calc(i) {
     pct: sales ? (sales - purchase) / sales : 0,
   };
 }
+// acquiredQty is the original stock. qty is always the currently remaining stock.
+// These helpers also preserve compatibility with older all-or-nothing sold records.
+function acquiredQty(i) {
+  return Math.max(0, Number(i.acquiredQty ?? i.qty) || 0);
+}
+function soldQty(i) {
+  const acquired = acquiredQty(i);
+  const stored = Number(i.soldQty);
+  return Math.min(acquired, Math.max(0, Number.isFinite(stored) ? stored : i.sold ? acquired : 0));
+}
+function remainingQty(i) {
+  const acquired = acquiredQty(i);
+  const left = Number(i.qty);
+  return Math.min(acquired - soldQty(i), Math.max(0, Number.isFinite(left) ? left : acquired - soldQty(i)));
+}
+function soldEvents(i) {
+  if (Array.isArray(i.saleEvents)) return i.saleEvents;
+  return i.soldAt && soldQty(i) ? [{ qty: soldQty(i), soldAt: i.soldAt }] : [];
+}
+function soldSummary(i, qty = soldQty(i)) {
+  const acquired = acquiredQty(i);
+  const x = calc(i);
+  const count = Math.min(acquired, Math.max(0, Number(qty) || 0));
+  const purchase = acquired ? x.purchase * (count / acquired) : 0;
+  const sales = (Number(i.sale) || 0) * count;
+  return { purchase, sales, profit: sales - purchase, pct: sales ? (sales - purchase) / sales : 0 };
+}
+function addSale(i, qty) {
+  const count = Math.min(remainingQty(i), Math.max(0, Number(qty) || 0));
+  if (!count) return false;
+  const now = new Date().toISOString();
+  i.acquiredQty = acquiredQty(i);
+  i.qty = remainingQty(i) - count;
+  i.soldQty = soldQty(i) + count;
+  i.saleEvents = [...soldEvents(i), { qty: count, soldAt: now }];
+  i.sold = i.qty === 0;
+  i.soldAt = i.sold ? now : null;
+  return true;
+}
+function undoLastSale(i) {
+  const events = [...soldEvents(i)];
+  const last = events.pop();
+  if (!last) return false;
+  const count = Math.min(soldQty(i), Math.max(0, Number(last.qty) || 0));
+  i.qty = Math.min(acquiredQty(i), remainingQty(i) + count);
+  i.soldQty = Math.max(0, soldQty(i) - count);
+  i.saleEvents = events;
+  i.sold = i.qty === 0;
+  i.soldAt = i.sold ? events.at(-1)?.soldAt || null : null;
+  return true;
+}
 function totals(o) {
-  return o.items.reduce(
+  const total = (o.items || []).reduce(
     (a, i) => {
-      let x = calc(i);
+      const x = calc(i);
       a.purchase += x.purchase;
-      a.items += +i.qty || 0;
-      if (i.sold) {
-        a.sales += x.sales;
-        a.profit += x.profit;
-        a.sold += +i.qty || 0;
-      }
+      a.items += acquiredQty(i);
+      const sold = soldSummary(i);
+      a.sales += sold.sales;
+      a.profit += sold.profit;
+      a.sold += soldQty(i);
       return a;
     },
     { purchase: 0, sales: 0, profit: 0, items: 0, sold: 0 },
   );
+  (state.customerSales || [])
+    .filter((sale) => sale.orderId === o.id)
+    .forEach((sale) => {
+      total.sales += Number(sale.sales) || 0;
+      total.profit += (Number(sale.sales) || 0) - (Number(sale.purchase) || 0);
+      total.sold += Number(sale.quantity) || 0;
+    });
+  return total;
 }
 function allTotals() {
   return state.orders.reduce(
     (a, o) => {
-      let t = totals(o);
-      for (let k in a) a[k] += t[k];
+      const t = totals(o);
+      Object.keys(a).forEach((k) => (a[k] += t[k]));
       return a;
     },
     { purchase: 0, sales: 0, profit: 0, items: 0, sold: 0 },
   );
 }
-function dateTime(v) {
-  return new Intl.DateTimeFormat("az-AZ", {
-    dateStyle: "short",
-    timeStyle: "short",
-  }).format(new Date(v));
+async function refreshCustomerOrders() {
+  const response = await fetch("/api/customer-orders", {
+    headers: { Authorization: `Bearer ${localStorage.stockpilotToken}` },
+  });
+  if (!response.ok) throw new Error("Sifarişlər yenilənmədi.");
+  state.customerOrders = (await response.json()).orders || [];
+  const stateResponse = await fetch("/api/state", {
+    headers: { Authorization: `Bearer ${localStorage.stockpilotToken}` },
+  });
+  if (stateResponse.ok) {
+    const fresh = (await stateResponse.json()).state || {};
+    state.orders = Array.isArray(fresh.orders) ? fresh.orders : state.orders;
+    state.customerSales = Array.isArray(fresh.customerSales) ? fresh.customerSales : state.customerSales;
+    state.countries = { ...state.countries, ...(fresh.countries || {}) };
+  }
+}
+function customerHistory() {
+  const history = [...state.customerOrders].sort(
+    (a, b) => new Date(b.updatedAt || b.createdAt) - new Date(a.updatedAt || a.createdAt),
+  );
+  showModal(
+    "Bütün müştəri sifarişləri",
+    `<p class="hint">Burada bütün statuslardakı sifarişlər göstərilir.</p><div class="customer-history">${history.length ? history.map((order) => customerOrderCard(order)).join("") : "<p class=\"hint\">Hələ müştəri sifarişi yoxdur.</p>"}</div>`,
+  );
+  bindCustomerOrderActions();
+}
+function editCustomerOrder(id) {
+  const order = state.customerOrders.find((item) => item.id === id);
+  if (!order) return;
+  const customer = order.customer || {};
+  showModal(
+    "Müştəri sifarişini redaktə et",
+    `<div class="grid"><div class="field"><label>Ad soyad</label><input id="customerName" value="${esc(customer.name)}"></div><div class="field"><label>Telefon</label><input id="customerPhone" value="${esc(customer.phone)}"></div><div class="field wide"><label>Qeyd</label><input id="customerNote" value="${esc(customer.note || "")}"></div><div class="field"><label>Çatdırılma</label><select id="customerDelivery"><option value="metro" ${customer.delivery === "metro" ? "selected" : ""}>Metro təhvil</option><option value="address" ${customer.delivery === "address" ? "selected" : ""}>Ünvana çatdırılma</option></select></div><div class="field"><label>İstədiyi tarix/saat</label><input id="customerPreferredAt" type="datetime-local" value="${esc(customer.preferredAt || "")}"></div><div class="field"><label>Metro / rayon</label><input id="customerMetro" value="${esc(customer.metro || "")}"></div><div class="field wide"><label>Ünvan</label><input id="customerAddress" value="${esc(customer.address || "")}"></div><div class="field wide"><label>Ödəniş</label><select id="customerPayment"><option value="cash" ${customer.payment === "cash" ? "selected" : ""}>Nağd ödəniş</option><option value="card" ${customer.payment === "card" ? "selected" : ""}>Kartla ödəniş</option></select></div></div><button id="saveCustomerEdit" class="primary" style="margin-top:14px">Dəyişiklikləri yadda saxla</button>`,
+  );
+  $("saveCustomerEdit").onclick = async () => {
+    const response = await fetch(`/api/customer-orders/${id}`, {
+      method: "PUT",
+      headers: { "content-type": "application/json", Authorization: `Bearer ${localStorage.stockpilotToken}` },
+      body: JSON.stringify({ status: order.status, customer: { name: $("customerName").value, phone: $("customerPhone").value, note: $("customerNote").value, delivery: $("customerDelivery").value, preferredAt: $("customerPreferredAt").value, metro: $("customerMetro").value, address: $("customerAddress").value, payment: $("customerPayment").value } }),
+    });
+    if (!response.ok) return alert("Dəyişiklik yadda saxlanmadı.");
+    await refreshCustomerOrders();
+    hideModal();
+    render();
+  };
+}
+function bindCustomerOrderActions() {
+  document.querySelectorAll("[data-customer-status]").forEach((select) => (select.onchange = async () => {
+    const response = await fetch(`/api/customer-orders/${select.dataset.customerStatus}`, { method: "PUT", headers: { "content-type": "application/json", Authorization: `Bearer ${localStorage.stockpilotToken}` }, body: JSON.stringify({ status: select.value }) });
+    if (!response.ok) return alert("Status yadda saxlanmadı.");
+    const result = await response.json().catch(() => ({}));
+    if (result.whatsappUrl && confirm("Müştəriyə WhatsApp status mesajı açılsın?")) window.open(result.whatsappUrl, "_blank", "noopener");
+    await refreshCustomerOrders();
+    hideModal();
+    render();
+  }));
+  document.querySelectorAll("[data-customer-edit]").forEach((button) => (button.onclick = () => editCustomerOrder(button.dataset.customerEdit)));
+  document.querySelectorAll("[data-customer-delete]").forEach((button) => (button.onclick = async () => {
+    if (!confirm("Müştəri sifarişi silinsin?")) return;
+    const response = await fetch(`/api/customer-orders/${button.dataset.customerDelete}`, { method: "DELETE", headers: { Authorization: `Bearer ${localStorage.stockpilotToken}` } });
+    if (!response.ok) return alert("Sifariş silinmədi.");
+    await refreshCustomerOrders();
+    hideModal();
+    render();
+  }));
+}
+function newOrder() {
+  const o = {
+    id: Date.now().toString(),
+    name: `Sifariş ${state.orders.length + 1}`,
+    budget: 0,
+    note: "",
+    archived: false,
+    createdAt: new Date().toISOString(),
+    items: [],
+  };
+  state.orders.push(o);
+  state.active = o.id;
+  save();
+  render();
+}
+function duplicateOrder() {
+  const source = active();
+  if (!source) return newOrder();
+  const copy = {
+    ...JSON.parse(JSON.stringify(source)),
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    name: `${source.name || "Sifariş"} — kopya`,
+    createdAt: new Date().toISOString(),
+    archived: false,
+    // Yeni cədvəl satış tarixçəsini yox, yalnız məhsulları kopyalayır.
+    items: (source.items || []).map((item) => {
+      const result = { ...item };
+      const count = acquiredQty(item);
+      result.qty = count;
+      result.acquiredQty = count;
+      result.sold = false;
+      result.soldQty = 0;
+      result.saleEvents = [];
+      delete result.soldAt;
+      return result;
+    }),
+  };
+  state.orders.push(copy);
+  state.active = copy.id;
+  save();
+  render();
+}
+function sortedOrders() {
+  return state.orders
+    .filter((o) => Boolean(o.archived) === Boolean(state.ui.showArchived))
+    .sort((a, b) =>
+    state.ui.orderSort === "oldest"
+      ? new Date(a.createdAt) - new Date(b.createdAt)
+      : new Date(b.createdAt) - new Date(a.createdAt),
+  );
 }
 function compactImage(file) {
   return new Promise((ok, no) => {
-    let r = new FileReader();
+    const r = new FileReader();
     r.onload = () => {
-      let im = new Image();
+      const im = new Image();
       im.onload = () => {
-        let c = document.createElement("canvas"),
+        const c = document.createElement("canvas"),
           z = Math.min(1, 180 / Math.max(im.width, im.height));
         c.width = im.width * z;
         c.height = im.height * z;
@@ -155,7 +394,7 @@ function compactImage(file) {
 }
 function tabs() {
   $("tabs").innerHTML =
-    state.orders
+    sortedOrders()
       .map(
         (o) =>
           `<button class="tab ${o.id === state.active ? "active" : ""}" data-id="${o.id}">${esc(o.name)}</button>`,
@@ -172,6 +411,13 @@ function tabs() {
   );
   $("newOrder").onclick = newOrder;
 }
+function productDetail(item) {
+  const x = calc(item), sold = soldSummary(item), left = remainingQty(item);
+  showModal(
+    item.name,
+    `<div class="detail-card">${item.img ? `<img class="thumb" src="${item.img}">` : '<div class="noimg">Şəkil<br>yoxdur</div>'}<div><p class="category">${esc(item.category || "Digər")} · ${x.c.name}</p><div class="detail-grid"><div>Stokda qalan<b>${left} ədəd</b></div><div>Satılan<b>${soldQty(item)} ədəd</b></div><div>Çəki<b>${item.weight || 0} qr</b></div><div>Ümumi alış<b>${money(x.purchase)} ₼</b></div><div>Reallaşan qazanc<b class="lime">${money(sold.profit)} ₼</b></div><div>Karqo<b>${money(x.ship * x.c.rate)} ₼</b></div></div></div></div>`,
+  );
+}
 function countryOptions(selected) {
   return Object.entries(state.countries)
     .map(
@@ -180,49 +426,194 @@ function countryOptions(selected) {
     )
     .join("");
 }
+function visibleItems(o) {
+  const q = state.ui.search.trim().toLocaleLowerCase("az"),
+    status = state.ui.status;
+  return (o.items || [])
+    .map((item, index) => ({ item, index }))
+    .filter(
+      ({ item }) =>
+        (!q ||
+          `${item.name} ${item.category || ""}`
+            .toLocaleLowerCase("az")
+            .includes(q)) &&
+        (status === "all" || (status === "sold" ? soldQty(item) > 0 : remainingQty(item) > 0)),
+    );
+}
+function undoBox() {
+  const box = $("undoToast");
+  if (!box) return;
+  if (!lastDeleted) {
+    box.classList.add("hidden");
+    return;
+  }
+  box.innerHTML = `<span>Son silinən məhsul: <b>${esc(lastDeleted.item.name)}</b></span><button id="undoDelete" class="secondary">Geri qaytar</button>`;
+  box.classList.remove("hidden");
+  $("undoDelete").onclick = () => {
+    const o = state.orders.find((x) => x.id === lastDeleted.orderId);
+    if (o) {
+      o.items.splice(lastDeleted.index, 0, lastDeleted.item);
+      save();
+    }
+    lastDeleted = null;
+    render();
+  };
+}
+function collapsePanel(panel, id, title, info, opened) {
+  const disclosure = document.createElement("details");
+  disclosure.id = id;
+  disclosure.className = "box disclosure";
+  disclosure.open = Boolean(opened);
+  disclosure.innerHTML = `<summary><span><small>${title}</small><b>${info}</b></span><i>⌄</i></summary>`;
+  panel.parentNode.insertBefore(disclosure, panel);
+  panel.classList.remove("box");
+  disclosure.append(panel);
+  disclosure.ontoggle = () => {
+    if (id === "orderDetails") state.ui.orderDetailsOpen = disclosure.open;
+    if (id === "filterDetails") state.ui.filtersOpen = disclosure.open;
+    if (id === "productForm") state.ui.productFormOpen = disclosure.open;
+    save();
+  };
+}
+function compactPanels(order) {
+  collapsePanel(
+    document.querySelector(".orderbar"),
+    "orderDetails",
+    "Sifariş məlumatları",
+    `${esc(order.name)} · ${dateTime(order.createdAt)}`,
+    state.ui.orderDetailsOpen,
+  );
+  const activeFilter = state.ui.search || state.ui.status !== "all";
+  collapsePanel(
+    document.querySelector(".tools"),
+    "filterDetails",
+    "Axtarış və filterlər",
+    activeFilter ? "Filter aktivdir" : "Məhsulları tap və sırala",
+    state.ui.filtersOpen,
+  );
+  collapsePanel(
+    document.querySelector(".workspace .form"),
+    "productForm",
+    editing !== null ? "Məhsulu redaktə et" : "Məhsul əlavə et",
+    editing !== null ? "Dəyişikliklər üçün aç" : "Yeni məhsul əlavə etmək üçün aç",
+    editing !== null || !order.items?.length || state.ui.productFormOpen,
+  );
+}
+function renderCustomerPanel() {
+  const counts = Object.fromEntries(
+    Object.keys(customerStatus).map((status) => [
+      status,
+      state.customerOrders.filter((order) => order.status === status).length,
+    ]),
+  );
+  const shown = state.ui.customerView === "all"
+    ? state.customerOrders
+    : state.customerOrders.filter((order) => order.status === state.ui.customerView);
+  const filterButton = (value, label, count) =>
+    `<button class="${state.ui.customerView === value ? "primary" : "secondary"}" data-customer-filter="${value}">${label} (${count})</button>`;
+  $("content").innerHTML = `<section class="box customer-orders customer-panel"><div class="customer-heading"><div><h2>Müştəri sifarişləri</h2><p>${state.customerOrders.length} ümumi sifariş · səhifə açıq olduqda avtomatik yenilənir.</p></div><div class="customer-actions"><button id="refreshCustomerOrders" class="secondary">Yenilə</button><button id="customerHistory" class="secondary">Tarixçə</button></div></div><div class="customer-filters">${filterButton("all", "Hamısı", state.customerOrders.length)}${filterButton("new", "Yeni", counts.new)}${filterButton("confirmed", "Təsdiqləndi", counts.confirmed)}${filterButton("preparing", "Hazırlanır", counts.preparing)}${filterButton("courier", "Kuryerdə", counts.courier)}${filterButton("delivered", "Tamamlandı", counts.delivered)}${filterButton("cancelled", "Ləğv edildi", counts.cancelled)}</div>${shown.length ? shown.map((order) => customerOrderCard(order)).join("") : '<p class="hint">Bu filtr üçün sifariş yoxdur.</p>'}</section>`;
+  if (location.hash.startsWith("#order-")) {
+    requestAnimationFrame(() => document.getElementById(location.hash.slice(1))?.scrollIntoView({ behavior: "smooth", block: "center" }));
+  }
+  if ($("customerHistory")) $("customerHistory").onclick = customerHistory;
+  if ($("refreshCustomerOrders")) $("refreshCustomerOrders").onclick = async () => {
+    try {
+      await refreshCustomerOrders();
+      render();
+    } catch {
+      alert("Sifarişlər yenilənmədi. Giriş sessiyasını yeniləyin.");
+    }
+  };
+  document.querySelectorAll("[data-customer-filter]").forEach((button) => {
+    button.onclick = () => {
+      state.ui.customerView = button.dataset.customerFilter;
+      render();
+    };
+  });
+  bindCustomerOrderActions();
+}
 function render() {
+  if (isCustomerPage) return renderCustomerPanel();
   if (!state.orders.length) return newOrder();
+  $("archiveToggle").textContent = state.ui.showArchived
+    ? "Aktiv sifarişlər"
+    : "Arxiv";
   tabs();
-  let o = active(),
-    e = Number.isInteger(editing) ? o.items[editing] : null;
+  const o = active();
+  if (!o || Boolean(o.archived) !== Boolean(state.ui.showArchived)) {
+    state.active = sortedOrders()[0]?.id || null;
+    if (!state.active && state.ui.showArchived) {
+      state.ui.showArchived = false;
+      return render();
+    }
+    if (!state.active) return newOrder();
+    return render();
+  }
+  const e = Number.isInteger(editing) ? o.items[editing] : null;
   if (!e) editing = null;
   if (e) pendingImage = e.img || "";
-  let t = totals(o),
-    remain = (+o.budget || 0) - t.purchase + t.sales;
+  const t = totals(o),
+    remain = (+o.budget || 0) - t.purchase + t.sales,
+    spent = Math.max(0, t.purchase - t.sales),
+    used = o.budget ? Math.min(100, (spent / +o.budget) * 100) : 0,
+    today = new Date().toDateString(),
+    todaySold = (o.items || []).flatMap((i) =>
+      soldEvents(i)
+        .filter((event) => event.soldAt && new Date(event.soldAt).toDateString() === today)
+        .map((event) => ({ item: i, qty: Number(event.qty) || 0 })),
+    ),
+    todayCustomerSales = (state.customerSales || []).filter(
+      (sale) => sale.orderId === o.id && sale.soldAt && new Date(sale.soldAt).toDateString() === today,
+    ),
+    todayValue = todaySold.reduce((s, sale) => s + soldSummary(sale.item, sale.qty).sales, 0) + todayCustomerSales.reduce((sum, sale) => sum + (Number(sale.sales) || 0), 0),
+    rows = visibleItems(o);
   $("content").innerHTML =
-    `<section class="box orderbar"><div class="field name"><label>Sifarişin adı</label><input id="orderName" value="${esc(o.name)}"></div><div class="field"><label>Yaradılma tarixi</label><input readonly value="${dateTime(o.createdAt)}"></div><div class="field"><label>Büdcə (₼)</label><input id="budget" type="number" min="0" value="${o.budget}"></div><div class="field"><label>Qeyd</label><input value="3 ölkə üzrə tarif" readonly></div><button id="deleteOrder" class="danger">Sifarişi sil</button></section>
-  <section class="workspace"><aside class="box form"><h2>${e ? "Məhsulu redaktə et" : "Məhsul əlavə et"}</h2><div class="grid"><div class="field wide"><label>Məhsulun adı</label><input id="name" value="${e ? esc(e.name) : ""}" placeholder="Məsələn: Kreatin"></div><div class="field"><label>Ölkə</label><select id="productCountry">${countryOptions(e ? e.country : "america")}</select></div><div class="field"><label>Say</label><input id="qty" type="number" min="1" value="${e ? e.qty : 1}"></div><div class="field"><label>Alış qiyməti</label><input id="price" type="number" min="0" step=".01" value="${e ? e.price : 0}"></div><div class="field"><label>Satış qiyməti (₼)</label><input id="sale" type="number" min="0" step=".01" value="${e ? e.sale : 0}"></div><div class="field wide"><label>Çəki (qram, ümumi)</label><input id="weight" type="number" min="0" value="${e ? e.weight : 0}"></div><div class="field wide"><label>Məhsul şəkli</label><input id="image" class="file" type="file" accept="image/png,image/jpeg,image/webp">${e && pendingImage ? '<button id="deleteImage" class="remove" style="margin:8px 0 0">Şəkli sil</button>' : ""}</div></div><p class="hint">Seçilən ölkənin tarifi və məzənnəsi avtomatik tətbiq olunur.</p><button id="saveItem" class="primary save">${e ? "Dəyişiklikləri yadda saxla" : "Listə əlavə et"}</button>${e ? '<button id="cancelEdit" class="secondary save">Ləğv et</button>' : ""}</aside>
-  <section class="box tablebox"><div class="scroll"><table class="items"><thead><tr><th>Şəkil</th><th>Məhsul</th><th>Ölkə</th><th>Say</th><th>Alış</th><th>Karqo</th><th>Ümumi alış</th><th>Satış</th><th>Qazanc</th><th>Faiz</th><th>Status</th><th>Əməliyyat</th></tr></thead><tbody>${
-    o.items.length
-      ? o.items
-          .map((i, n) => {
-            let x = calc(i),
-              im = i.img
-                ? `<img class="thumb" src="${i.img}">`
-                : '<div class="noimg">Şəkil<br>yoxdur</div>';
-            return `<tr><td>${im}</td><td><b>${esc(i.name)}</b></td><td>${x.c.name}</td><td class="num">${i.qty}</td><td class="num">${money((+i.price || 0) * (+i.qty || 0) * x.c.rate)} ₼</td><td class="num">${money(x.ship * x.c.rate)} ₼<br><small>${range(i.weight)}</small></td><td class="num">${money(x.purchase)} ₼</td><td class="num">${money(x.sales)} ₼</td><td class="num lime">${money(x.profit)} ₼</td><td class="num">${(x.pct * 100).toFixed(1)}%</td><td><button class="sold" data-sold="${n}">${i.sold ? "Satılıb" : "Satıldı et"}</button></td><td><button class="edit" data-edit="${n}">Redaktə</button><button class="remove" data-remove="${n}">Sil</button></td></tr>`;
-          })
-          .join("")
-      : '<tr><td colspan="12" class="empty">Hələ məhsul əlavə edilməyib.<br><small>Soldakı formdan ilk məhsulunu əlavə et.</small></td></tr>'
-  }</tbody></table></div></section></section>
-  <section class="metrics"><div class="box metric"><span>Ümumi alış</span><strong>${money(t.purchase)} ₼</strong></div><div class="box metric"><span>Satışdan daxil olan</span><strong>${money(t.sales)} ₼</strong></div><div class="box metric"><span>Satış qazancı</span><strong class="lime">${money(t.profit)} ₼</strong></div><div class="box metric"><span>Büdcədə qalan</span><strong class="lime">${money(remain)} ₼</strong></div></section><section class="box tariff-box"><h2>Aktiv karqo tarifləri</h2><div class="tariff-list">${Object.values(
-    state.countries,
-  )
-    .map(
-      (c) =>
-        `<div><b>${c.name}</b>0–100 qr: ${c.tariffs[0]} ${c.currency}<br>501 qr–1 kq: ${c.tariffs[3]} ${c.currency}</div>`,
-    )
-    .join("")}</div></section>`;
+    `<section class="box orderbar"><div class="field name"><label>Sifarişin adı</label><input id="orderName" value="${esc(o.name)}"></div><div class="field"><label>Yaradılma tarixi</label><input readonly value="${dateTime(o.createdAt)}"></div><div class="field"><label>Büdcə (₼)</label><input id="budget" type="number" min="0" value="${o.budget || 0}"></div><div class="field"><label>Qısa qeyd</label><input id="orderNote" maxlength="80" value="${esc(o.note || "")}" placeholder="Məsələn: Avqust malları"></div><button id="duplicateOrder" class="secondary" title="Bu cədvəlin kopyasını yarat">Dublikat et</button><button id="archiveOrder" class="secondary">${o.archived ? "Arxivdən çıxar" : "Arxivlə"}</button><button id="deleteOrder" class="danger">Sifarişi sil</button></section><section class="box tools"><input id="search" value="${esc(state.ui.search)}" placeholder="Məhsul adında axtarış…"><select id="statusFilter"><option value="all">Bütün məhsullar</option><option value="sold" ${state.ui.status === "sold" ? "selected" : ""}>Satılanlar</option><option value="unsold" ${state.ui.status === "unsold" ? "selected" : ""}>Satılmayanlar</option></select><select id="orderSort"><option value="newest">Yeni sifarişlər əvvəl</option><option value="oldest" ${state.ui.orderSort === "oldest" ? "selected" : ""}>Köhnə sifarişlər əvvəl</option></select><small>Son yadda saxlanma: ${dateTime(state.ui.lastSavedAt)}</small></section><section class="workspace"><aside class="box form"><h2>${e ? "Məhsulu redaktə et" : "Məhsul əlavə et"}</h2><div class="grid"><div class="field wide"><label>Məhsulun adı</label><input id="name" value="${e ? esc(e.name) : ""}" placeholder="Məsələn: Kreatin"></div><div class="field"><label>Kateqoriya</label><select id="category">${["Əlavələr", "Geyim", "Elektronika", "Kosmetika", "Ev və digər"].map((v) => `<option ${e?.category === v ? "selected" : ""}>${v}</option>`).join("")}</select></div><div class="field"><label>Ölkə</label><select id="productCountry">${countryOptions(e ? e.country : "america")}</select></div><div class="field"><label>Say</label><div class="qty-control"><button type="button" id="qtyMinus">−</button><input id="qty" type="number" min="1" value="${e ? e.qty : 1}"><button type="button" id="qtyPlus">+</button></div></div><div class="field"><label>Minimum stok</label><input id="minStock" type="number" min="0" value="${e?.minStock ?? 3}"></div><div class="field"><label>Alış qiyməti</label><input id="price" type="number" min="0" step=".01" value="${e ? e.price : 0}"></div><div class="field"><label>Satış qiyməti (₼)</label><input id="sale" type="number" min="0" step=".01" value="${e ? e.sale : 0}"></div><div class="field wide"><label>Çəki (qram, ümumi)</label><input id="weight" type="number" min="0" value="${e ? e.weight : 0}"></div><div class="field wide"><label>Məhsul şəkli</label><input id="image" class="file" type="file" accept="image/png,image/jpeg,image/webp">${e && pendingImage ? '<button id="deleteImage" class="remove" style="margin-top:8px">Şəkli sil</button>' : ""}</div></div><p class="hint">Seçilən ölkənin tarifi və məzənnəsi avtomatik tətbiq olunur.</p><button id="saveItem" class="primary save">${e ? "Dəyişiklikləri yadda saxla" : "Listə əlavə et"}</button>${e ? '<button id="cancelEdit" class="secondary save">Ləğv et</button>' : ""}</aside><section class="box tablebox"><div class="scroll"><table class="items"><thead><tr><th>Şəkil</th><th>Məhsul / kateqoriya</th><th>Ölkə</th><th>Say</th><th>Alış</th><th>Karqo</th><th>Ümumi alış</th><th>Satış</th><th>Qazanc</th><th>Faiz</th><th>Status</th><th>Əməliyyat</th></tr></thead><tbody>${
+      rows.length
+        ? rows
+            .map(({ item: i, index: n }) => {
+              const x = calc(i),
+                sold = soldSummary(i),
+                left = remainingQty(i),
+                soldCount = soldQty(i),
+                im = i.img
+                  ? `<img class="thumb" src="${i.img}">`
+                  : '<div class="noimg">Şəkil<br>yoxdur</div>';
+              const isLow = left > 0 && left <= (+i.minStock || 3);
+              return `<tr><td>${im}</td><td><button class="fav ${i.favorite ? "active" : ""}" data-fav="${n}" title="Favorit">★</button><button class="product-link" data-detail="${n}"><b>${esc(i.name)}</b></button><small class="category">${esc(i.category || "Digər")}</small>${isLow ? '<small class="stock-low">Stok azalır</small>' : ""}</td><td>${x.c.name}</td><td class="num"><b>${left}</b><br><small>${soldCount} satılıb</small></td><td class="num">${money((+i.price || 0) * acquiredQty(i) * x.c.rate)} ₼</td><td class="num">${money(x.ship * x.c.rate)} ₼<br><small>${range(i.weight)}</small></td><td class="num">${money(x.purchase)} ₼</td><td class="num">${money(sold.sales)} ₼</td><td class="num lime">${money(sold.profit)} ₼</td><td class="num">${(sold.pct * 100).toFixed(1)}%</td><td>${left ? `<button class="sold" data-sold="${n}">+ Satış əlavə et</button>` : '<span class="status-complete">Hamısı satılıb</span>'}${soldCount ? `<button class="undo-sale" data-undo-sale="${n}">Son satışı geri al</button>` : ""}</td><td><button class="edit" data-edit="${n}">Redaktə</button><button class="remove" data-remove="${n}">Sil</button></td></tr>`;
+            })
+            .join("")
+        : '<tr><td colspan="12" class="empty">Bu filterdə məhsul yoxdur.</td></tr>'
+    }</tbody></table></div></section></section><section class="metrics"><div class="box metric"><span>Ümumi alış</span><strong>${money(t.purchase)} ₼</strong></div><div class="box metric"><span>Bu gün satılanlar</span><strong>${todaySold.reduce((sum, sale) => sum + sale.qty, 0) + todayCustomerSales.reduce((sum, sale) => sum + (Number(sale.quantity) || 0), 0)} ədəd</strong><small>${money(todayValue)} ₼ satış</small></div><div class="box metric"><span>Satış qazancı</span><strong class="lime">${money(t.profit)} ₼</strong></div><div class="box metric budget-card"><span>Büdcə: xərcləndi / qaldı</span><strong>${money(spent)} ₼ / ${money(Math.max(0, remain))} ₼</strong><div class="progress"><i style="width:${used}%"></i></div><small>${used.toFixed(1)}% xərclənib</small></div></section>`;
+  compactPanels(o);
   bind(o, e);
+  undoBox();
 }
 function bind(o, e) {
-  $("orderName").oninput = (v) => {
+  $("orderName").onchange = (v) => {
     o.name = v.target.value || "Adsız sifariş";
     save();
     tabs();
   };
-  $("budget").oninput = (v) => {
+  $("orderNote").onchange = (v) => {
+    o.note = v.target.value;
+    save();
+  };
+  $("budget").onchange = (v) => {
     o.budget = +v.target.value || 0;
+    save();
+    render();
+  };
+  $("search").oninput = (v) => {
+    state.ui.search = v.target.value;
+    render();
+  };
+  $("statusFilter").onchange = (v) => {
+    state.ui.status = v.target.value;
+    render();
+  };
+  $("orderSort").onchange = (v) => {
+    state.ui.orderSort = v.target.value;
     save();
     render();
   };
@@ -234,8 +625,19 @@ function bind(o, e) {
       render();
     }
   };
-  $("image").onchange = async (e) => {
-    if (e.target.files[0]) pendingImage = await compactImage(e.target.files[0]);
+  $("archiveOrder").onclick = () => {
+    o.archived = !o.archived;
+    state.ui.showArchived = o.archived;
+    state.active = sortedOrders()[0]?.id || null;
+    save();
+    render();
+  };
+  $("duplicateOrder").onclick = duplicateOrder;
+  $("qtyMinus").onclick = () =>
+    ($("qty").value = Math.max(1, (+$("qty").value || 1) - 1));
+  $("qtyPlus").onclick = () => ($("qty").value = (+$("qty").value || 0) + 1);
+  $("image").onchange = async (v) => {
+    if (v.target.files[0]) pendingImage = await compactImage(v.target.files[0]);
   };
   if ($("deleteImage"))
     $("deleteImage").onclick = () => {
@@ -249,15 +651,30 @@ function bind(o, e) {
       render();
     };
   $("saveItem").onclick = () => {
-    let i = {
+    const requestedQty = +$("qty").value || 0;
+    const adjustedAcquiredQty = e
+      ? Math.max(
+          soldQty(e) + requestedQty,
+          acquiredQty(e) + requestedQty - remainingQty(e),
+        )
+      : requestedQty;
+    const i = {
+      id: e?.id || crypto.randomUUID(),
       name: $("name").value.trim(),
+      category: $("category").value,
       country: $("productCountry").value,
-      qty: +$("qty").value || 0,
+      qty: requestedQty,
+      acquiredQty: adjustedAcquiredQty,
+      minStock: +$("minStock").value || 0,
       price: +$("price").value || 0,
       sale: +$("sale").value || 0,
       weight: +$("weight").value || 0,
       img: pendingImage,
-      sold: e ? e.sold : false,
+      favorite: e?.favorite || false,
+      soldQty: e ? soldQty(e) : 0,
+      saleEvents: e ? soldEvents(e) : [],
+      sold: e ? Boolean(e.sold) : false,
+      soldAt: e?.soldAt || null,
     };
     if (!i.name || !i.qty) return alert("Məhsulun adını və sayını yazın.");
     if (e) o.items[editing] = i;
@@ -274,10 +691,24 @@ function bind(o, e) {
         render();
       }),
   );
+  document.querySelectorAll("[data-detail]").forEach(
+    (b) => (b.onclick = () => productDetail(o.items[+b.dataset.detail])),
+  );
+  document.querySelectorAll("[data-fav]").forEach(
+    (b) =>
+      (b.onclick = () => {
+        const item = o.items[+b.dataset.fav];
+        item.favorite = !item.favorite;
+        save();
+        render();
+      }),
+  );
   document.querySelectorAll("[data-remove]").forEach(
     (b) =>
       (b.onclick = () => {
-        o.items.splice(+b.dataset.remove, 1);
+        const index = +b.dataset.remove;
+        lastDeleted = { orderId: o.id, index, item: o.items[index] };
+        o.items.splice(index, 1);
         save();
         render();
       }),
@@ -285,13 +716,27 @@ function bind(o, e) {
   document.querySelectorAll("[data-sold]").forEach(
     (b) =>
       (b.onclick = () => {
-        let item = o.items[+b.dataset.sold];
-        item.sold = !item.sold;
-        item.soldAt = item.sold ? new Date().toISOString() : null;
+        const i = o.items[+b.dataset.sold];
+        const count = Number(prompt(`Neçə ədəd satıldı? Stokda ${remainingQty(i)} ədəd var.`, "1"));
+        if (!Number.isFinite(count) || count <= 0) return;
+        if (count > remainingQty(i)) return alert(`Stokda yalnız ${remainingQty(i)} ədəd qalıb.`);
+        addSale(i, count);
         save();
         render();
       }),
   );
+  document.querySelectorAll("[data-undo-sale]").forEach(
+    (b) =>
+      (b.onclick = () => {
+        const i = o.items[+b.dataset.undoSale];
+        if (undoLastSale(i)) {
+          save();
+          render();
+        }
+      }),
+  );
+  if ($("customerHistory")) $("customerHistory").onclick = customerHistory;
+  bindCustomerOrderActions();
 }
 function showModal(title, html) {
   $("modalTitle").textContent = title;
@@ -302,15 +747,21 @@ function hideModal() {
   $("modal").classList.add("hidden");
 }
 function tariffSettings() {
-  let rows = Object.entries(state.countries)
+  const bands = [
+    ["0–100 qr", "Bu çəkiyə qədər sabit qiymət"],
+    ["101–250 qr", "Bu çəkiyə qədər sabit qiymət"],
+    ["251–500 qr", "Bu çəkiyə qədər sabit qiymət"],
+    ["501 qr – 1 kq", "1 kq-dan yuxarı hər başlanmış kq üçün"],
+  ];
+  const rows = Object.entries(state.countries)
     .map(
       ([k, c]) =>
-        `<div class="country-editor"><b>${c.name} (${c.currency})</b>${c.tariffs.map((v, n) => `<input data-country="${k}" data-tariff="${n}" type="number" step=".01" value="${v}">`).join("")}<input data-rate="${k}" type="number" step=".01" value="${c.rate}" title="AZN məzənnəsi"></div>`,
+        `<section class="country-editor tariff-editor"><div class="tariff-title"><label>Ölkə adı<input data-country-name="${k}" value="${esc(c.name)}" aria-label="Ölkə adı"></label><label>Valyuta<input data-currency="${k}" value="${esc(c.currency)}" maxlength="3" aria-label="Valyuta"></label><label>1 vahid = AZN<input data-rate="${k}" type="number" min="0" step=".01" value="${c.rate}" aria-label="AZN məzənnəsi"></label></div><div class="tariff-bands">${c.tariffs.map((v, n) => `<label><b>${bands[n][0]}</b><small>${bands[n][1]}</small><span><input data-country="${k}" data-tariff="${n}" type="number" min="0" step=".01" value="${v}" aria-label="${bands[n][0]} karqo tarifi">${esc(c.currency)}</span></label>`).join("")}</div></section>`,
     )
     .join("");
   showModal(
     "Tarif və məzənnə ayarları",
-    `<p class="hint">Sıra: 0–100 qr, 101–250 qr, 251–500 qr, 501 qr–1 kq, AZN məzənnəsi.</p>${rows}<button id="saveTariffs" class="primary" style="margin-top:12px">Tarifləri yadda saxla</button>`,
+    `<p class="hint">Hər ölkənin karqo planını ayrıca dəyişin. 1 kq-dan ağır məhsulda son qiymət hər başlanmış kq üçün tətbiq olunur və AZN məbləği avtomatik hesablanır.</p>${rows}<button id="saveTariffs" class="primary" style="margin-top:12px">Tarifləri yadda saxla</button>`,
   );
   $("saveTariffs").onclick = () => {
     document
@@ -323,18 +774,25 @@ function tariffSettings() {
     document
       .querySelectorAll("[data-rate]")
       .forEach((x) => (state.countries[x.dataset.rate].rate = +x.value || 0));
-    save();
+    document.querySelectorAll("[data-country-name]").forEach((x) => {
+      state.countries[x.dataset.countryName].name = x.value.trim() || "Ölkə";
+    });
+    document.querySelectorAll("[data-currency]").forEach((x) => {
+      state.countries[x.dataset.currency].currency = x.value.trim() || "₼";
+    });
+    save(true);
     hideModal();
     render();
   };
 }
-function exportExcel() {
-  if (!window.XLSX) return alert("Excel modulu yüklənmədi.");
-  let wb = XLSX.utils.book_new();
+async function exportExcel() {
+  try { await loadXlsx(); } catch { return alert("Excel modulu yüklənmədi. İnterneti yoxlayın."); }
+  const wb = XLSX.utils.book_new();
   state.orders.forEach((o, n) => {
-    let rows = [
+    const rows = [
       [
         "Məhsul",
+        "Kateqoriya",
         "Ölkə",
         "Say",
         "Alış (₼)",
@@ -344,12 +802,14 @@ function exportExcel() {
         "Qazanc",
         "Faiz",
         "Status",
+        "Satış tarixi",
       ],
     ];
     o.items.forEach((i) => {
-      let x = calc(i);
+      const x = calc(i);
       rows.push([
         i.name,
+        i.category || "Digər",
         x.c.name,
         i.qty,
         (+i.price || 0) * (+i.qty || 0) * x.c.rate,
@@ -359,38 +819,220 @@ function exportExcel() {
         x.profit,
         x.pct,
         i.sold ? "Satılıb" : "Satılmayıb",
+        i.soldAt ? dateTime(i.soldAt) : "",
       ]);
     });
-    let ws = XLSX.utils.aoa_to_sheet(rows);
+    const ws = XLSX.utils.aoa_to_sheet(rows);
     ws["!cols"] = [
-      { wch: 30 },
+      { wch: 28 },
+      { wch: 16 },
       { wch: 13 },
       { wch: 8 },
-      { wch: 15 },
-      { wch: 15 },
-      { wch: 17 },
-      { wch: 15 },
-      { wch: 15 },
+      { wch: 14 },
+      { wch: 14 },
+      { wch: 16 },
+      { wch: 14 },
+      { wch: 14 },
       { wch: 11 },
       { wch: 14 },
+      { wch: 18 },
     ];
     XLSX.utils.book_append_sheet(
       wb,
       ws,
-      (o.name || "Sifariş " + (n + 1)).slice(0, 31),
+      (o.name || `Sifariş ${n + 1}`).slice(0, 31),
     );
   });
   XLSX.writeFile(wb, "stockpilot-hesabat.xlsx");
 }
+function normalizeHeader(value) {
+  return String(value || "")
+    .trim()
+    .toLocaleLowerCase("az")
+    .replace(/ə/g, "e")
+    .replace(/[ğ]/g, "g")
+    .replace(/[ı]/g, "i")
+    .replace(/[ö]/g, "o")
+    .replace(/[ş]/g, "s")
+    .replace(/[ü]/g, "u")
+    .replace(/[^a-z0-9]/g, "");
+}
+function readImportValue(row, aliases) {
+  const entry = Object.entries(row).find(([key]) =>
+    aliases.includes(normalizeHeader(key)),
+  );
+  return entry ? entry[1] : "";
+}
+function importCountry(value) {
+  const key = normalizeHeader(value);
+  if (["turkiye", "turkey", "tr"].includes(key)) return "turkey";
+  if (["ispaniya", "spain", "es"].includes(key)) return "spain";
+  return "america";
+}
+function importSold(value) {
+  return ["satilib", "satildi", "beli", "yes", "true", "1"].includes(
+    normalizeHeader(value),
+  );
+}
+async function importItems(file) {
+  if (!file) return;
+  try { await loadXlsx(); } catch { return alert("Excel modulu yüklənmədi. İnterneti yoxlayın."); }
+  const reader = new FileReader();
+  reader.onload = (event) => {
+    try {
+      const book = XLSX.read(event.target.result, { type: "array" });
+      const sheet = book.Sheets[book.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+      const o = active();
+      const items = rows
+        .map((row) => {
+          const name = String(
+            readImportValue(row, ["mehsul", "mehsulunadi", "product", "name"]),
+          ).trim();
+          const qty =
+            Number(readImportValue(row, ["say", "qty", "quantity"])) || 0;
+          const sold = importSold(
+            readImportValue(row, ["status", "satilib", "sold"]),
+          );
+          return {
+            id: crypto.randomUUID(),
+            name,
+            qty,
+            acquiredQty: qty,
+            category:
+              String(readImportValue(row, ["kateqoriya", "category"])).trim() ||
+              "Ev və digər",
+            country: importCountry(readImportValue(row, ["olke", "country"])),
+            price:
+              Number(
+                readImportValue(row, [
+                  "alisqiymeti",
+                  "alis",
+                  "price",
+                  "purchaseprice",
+                ]),
+              ) || 0,
+            sale:
+              Number(
+                readImportValue(row, [
+                  "satisqiymeti",
+                  "satis",
+                  "sale",
+                  "salesprice",
+                ]),
+              ) || 0,
+            weight:
+              Number(
+                readImportValue(row, ["ceki", "weight", "gram", "grams"]),
+              ) || 0,
+            img: "",
+            sold,
+            soldAt: sold ? new Date().toISOString() : null,
+          };
+        })
+        .filter((item) => item.name && item.qty > 0);
+      if (!items.length) {
+        return alert(
+          "Oxunan məhsul tapılmadı. Başlıqlar: Məhsul, Say, Alış qiyməti, Satış qiyməti, Çəki, Ölkə, Kateqoriya, Status.",
+        );
+      }
+      o.items.push(...items);
+      save();
+      render();
+      alert(`${items.length} məhsul aktiv sifarişə əlavə edildi.`);
+    } catch (error) {
+      alert("Excel faylı oxunmadı. Faylın formatını yoxlayın.");
+    }
+  };
+  reader.readAsArrayBuffer(file);
+}
+async function downloadImportTemplate() {
+  try { await loadXlsx(); } catch { return alert("Excel modulu yüklənmədi. İnterneti yoxlayın."); }
+  const rows = [
+    [
+      "Məhsul",
+      "Say",
+      "Alış qiyməti",
+      "Satış qiyməti",
+      "Çəki",
+      "Ölkə",
+      "Kateqoriya",
+      "Status",
+    ],
+    ["Kreatin", 2, 27, 120, 360, "Amerika", "Əlavələr", "Satılmayıb"],
+  ];
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws["!cols"] = [
+    { wch: 26 },
+    { wch: 8 },
+    { wch: 14 },
+    { wch: 15 },
+    { wch: 11 },
+    { wch: 13 },
+    { wch: 17 },
+    { wch: 14 },
+  ];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "Məhsullar");
+  XLSX.writeFile(wb, "stockpilot-mehsul-import-nuemune.xlsx");
+}
 window.startStockPilot = () => {
-  $("profileBtn").onclick = () => (location.href = "account.html");
+  $("profileBtn").onclick = () => (location.href = "profile.html");
+  if (isCustomerPage) {
+    $("personalOrdersPanel").onclick = () => (location.href = "dashboard.html");
+    const refreshWhenVisible = async () => {
+      if (document.visibilityState === "visible") {
+        try {
+          await refreshCustomerOrders();
+          render();
+        } catch {
+          // Sessiya bitibsə səhifə mövcud məlumatı göstərməyə davam edir.
+        }
+      }
+    };
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+  } else {
+    $("customerOrdersPanel").onclick = () => (location.href = "customer-orders.html");
+  }
   $("openStats").onclick = () => (location.href = "account.html");
-  $("openSettings").onclick = tariffSettings;
-  $("newOrderTop").onclick = newOrder;
-  $("exportBtn").onclick = exportExcel;
+  $("openSettings").onclick = (event) => {
+    event.preventDefault();
+    tariffSettings();
+  };
+  if ($("newOrderTop")) $("newOrderTop").onclick = newOrder;
+  if ($("archiveToggle")) $("archiveToggle").onclick = () => {
+    state.ui.showArchived = !state.ui.showArchived;
+    state.active = sortedOrders()[0]?.id || null;
+    save();
+    render();
+  };
+  if ($("exportBtn")) $("exportBtn").onclick = exportExcel;
+  if ($("importBtn")) $("importBtn").onclick = () => $("excelImport").click();
+  if ($("templateBtn")) $("templateBtn").onclick = downloadImportTemplate;
+  $("storeBtn").onclick = () => window.open(`store.html?shop=${encodeURIComponent(window.currentUser?.username || '')}`, '_blank');
+  if ($("quoteBtn")) $("quoteBtn").onclick = () => {
+    const o = active();
+    const w = window.open("", "_blank");
+    const itemText = o.items
+      .map((item) => `${esc(item.name)} — ${money(calc(item).sales)} ₼`)
+      .join("<br>");
+    w.document.write(`<title>Qiymət təklifi</title><h1>${esc(o.name)}</h1><p>${itemText}</p><h2>Cəmi: ${money(totals(o).sales)} ₼</h2><p>StockPilot qiymət təklifi</p>`);
+    w.document.close();
+    w.print();
+  };
+  if ($("excelImport")) $("excelImport").onchange = (event) => {
+    importItems(event.target.files[0]);
+    event.target.value = "";
+  };
+  if (location.hash === "#tariffs") setTimeout(tariffSettings, 0);
   $("closeModal").onclick = hideModal;
   $("modal").onclick = (e) => {
     if (e.target === $("modal")) hideModal();
   };
+  if (!isCustomerPage && new URLSearchParams(location.search).get("add") === "1") {
+    state.ui.productFormOpen = true;
+    history.replaceState({}, "", "dashboard.html");
+  }
   render();
 };
