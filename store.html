@@ -8,21 +8,182 @@
     <link rel="icon" type="image/png" href="stockpilot-192.png" />
     <title>Mağaza — StockPilot</title>
     <link rel="stylesheet" href="store.css" />
-      <link rel="stylesheet" href="redesign.css" />
-</head>
+  </head>
   <body>
-    <header class="store-header"><a href="index.html" aria-label="StockPilot ana səhifə"><img src="stockpilot-logo.png" alt="StockPilot" class="store-logo" /></a><button id="cartButton" aria-controls="cart" aria-expanded="false">Səbət <b id="cartCount">0</b></button></header>
-    <main><section class="hero"><p id="shopTag">ONLAYN MAĞAZA</p><h1 id="shopName">Mağaza yüklənir…</h1><p>Məhsulları seçin, səbətə əlavə edin və uyğun çatdırılma vaxtını qeyd edin.</p></section><div id="categories" class="categories" aria-label="Məhsul kateqoriyaları"></div><section id="products" class="products" aria-live="polite"></section></main>
+    <header class="store-header">
+      <a href="index.html" aria-label="StockPilot ana səhifə" class="brand-link">
+        <img src="stockpilot-logo.png" alt="StockPilot" class="store-logo" />
+      </a>
+      <div class="header-actions">
+        <button id="cartButton" class="cart-button" aria-controls="cart" aria-expanded="false">
+          <span>Səbət</span>
+          <b id="cartCount">0</b>
+        </button>
+      </div>
+    </header>
+
+    <main class="store-main">
+      <section class="hero">
+        <div class="hero-copy">
+          <p id="shopTag" class="eyebrow">ONLAYN MAĞAZA</p>
+          <h1 id="shopName">Mağaza yüklənir…</h1>
+          <p class="hero-text">
+            Məhsulları rahat seçin, səbətə əlavə edin və çatdırılma vaxtını
+            <strong>24 saat formatında</strong> tez bir şəkildə müəyyən edin.
+          </p>
+          <div class="hero-points">
+            <span>24 saat vaxt seçimi</span>
+            <span>Mobil və desktop üçün rahat</span>
+            <span>Sürətli checkout</span>
+          </div>
+        </div>
+        <aside class="hero-panel" aria-label="Sifariş üstünlükləri">
+          <div class="hero-panel-card">
+            <small>Rahat sifariş</small>
+            <b>Çox addım yoxdur</b>
+            <p>Tarix, saat və çatdırılma üsulu sadələşdirilib.</p>
+          </div>
+          <div class="hero-panel-card">
+            <small>Vaxt seçimi</small>
+            <b>09:00 · 12:00 · 15:00</b>
+            <p>Bir toxunuşla seç və ya tam 24 saat formatında vaxt göstər.</p>
+          </div>
+        </aside>
+      </section>
+
+      <section class="catalog-toolbar">
+        <label class="search-field" aria-label="Məhsul axtar">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4a6 6 0 1 0 0 12 6 6 0 0 0 0-12m0-2a8 8 0 1 1 0 16 8 8 0 0 1 0-16m11 19-4.35-4.35 1.4-1.4L22.4 19.6z"/></svg>
+          <input id="productSearch" type="search" placeholder="Məhsul axtar..." autocomplete="off" />
+        </label>
+        <div id="productCount" class="results-pill">0 məhsul</div>
+      </section>
+
+      <div id="categories" class="categories" aria-label="Məhsul kateqoriyaları"></div>
+      <section id="products" class="products" aria-live="polite"></section>
+    </main>
+
     <div id="cartBackdrop" class="cart-backdrop hidden"></div>
-    <aside id="cart" class="cart hidden" aria-label="Səbət" aria-hidden="true"><header><b>Səbətiniz</b><button id="closeCart" aria-label="Səbəti bağla">×</button></header><div id="cartLines"></div><form id="checkout"><h2>Sifarişi tamamla</h2>
-      <label class="checkout-field"><span>Ad və soyad</span><input name="name" autocomplete="name" required></label>
-      <label class="checkout-field"><span>Telefon nömrəsi</span><input name="phone" inputmode="tel" autocomplete="tel" placeholder="050 000 00 00" required></label>
-      <label class="checkout-field"><span>Əlavə qeyd <small>istəyə bağlı</small></span><textarea name="note" placeholder="Məsələn: zəng etmədən əvvəl mesaj yazın"></textarea></label>
-      <div class="schedule"><label>Çatdırılma tarixi<input id="preferredDate" name="preferredDate" type="date" required></label><label>Çatdırılma saatı<input id="preferredTime" name="preferredTime" type="time" step="300" required></label></div>
-      <label class="checkout-field"><span>Çatdırılma üsulu</span><select id="deliveryMethod" name="delivery"><option value="metro">Metroda təhvil</option><option value="address">Ünvana çatdırılma</option></select></label>
-      <label id="metroField" class="checkout-field"><span>Metro / rayon</span><input name="metro" autocomplete="address-level2"></label>
-      <label id="addressField" class="checkout-field hidden"><span>Tam ünvan</span><input name="address" autocomplete="street-address"></label>
-      <label class="checkout-field"><span>Ödəniş</span><select name="payment"><option value="cash">Nağd ödəniş</option><option value="card">Kartla ödəniş (çatdırılmada)</option></select></label>
-      <button class="buy" type="submit">Sifarişi göndər</button><p id="message" role="alert" aria-live="assertive"></p></form></aside><div id="toast" class="store-toast" role="status" aria-live="polite"></div><script src="store.js"></script>
+    <aside id="cart" class="cart hidden" aria-label="Səbət" aria-hidden="true">
+      <header class="cart-head">
+        <div>
+          <p class="eyebrow">CHECKOUT</p>
+          <b>Sifarişi tamamla</b>
+        </div>
+        <button id="closeCart" aria-label="Səbəti bağla">×</button>
+      </header>
+
+      <section class="cart-summary" aria-label="Səbət xülasəsi">
+        <div>
+          <span>Məhsul sayı</span>
+          <b id="cartItemsSummary">0 məhsul</b>
+        </div>
+        <div>
+          <span>Cəmi</span>
+          <b id="cartTotalSummary">0.00 ₼</b>
+        </div>
+      </section>
+
+      <div id="cartLines"></div>
+
+      <form id="checkout">
+        <section class="checkout-section">
+          <div class="section-head">
+            <h2>1. Əlaqə məlumatı</h2>
+            <p>Qısa və rahat doldur.</p>
+          </div>
+          <div class="checkout-grid checkout-grid-two">
+            <label class="checkout-field wide">
+              <span>Ad və soyad</span>
+              <input name="name" autocomplete="name" required />
+            </label>
+            <label class="checkout-field wide">
+              <span>Telefon nömrəsi</span>
+              <input name="phone" inputmode="tel" autocomplete="tel" placeholder="050 000 00 00" required />
+            </label>
+          </div>
+          <label class="checkout-field">
+            <span>Əlavə qeyd <small>istəyə bağlı</small></span>
+            <textarea name="note" placeholder="Məsələn: zəng etmədən əvvəl mesaj yazın"></textarea>
+          </label>
+        </section>
+
+        <section class="checkout-section">
+          <div class="section-head">
+            <h2>2. Çatdırılma vaxtı</h2>
+            <p>24 saat formatı ilə daha rahat seçim.</p>
+          </div>
+          <div id="dateChoices" class="choice-grid choice-grid-dates" aria-label="Sürətli tarix seçimi"></div>
+          <div class="checkout-grid checkout-grid-two compact-top">
+            <label class="checkout-field">
+              <span>Tarix</span>
+              <input id="preferredDate" name="preferredDate" type="date" required />
+            </label>
+            <label class="checkout-field">
+              <span>Saat <small>24 saat formatı</small></span>
+              <select id="preferredTime" name="preferredTime" required></select>
+            </label>
+          </div>
+          <div id="timeChoices" class="choice-grid choice-grid-times" aria-label="Sürətli saat seçimi"></div>
+          <p class="helper-text">Məsələn: 09:00, 14:30, 19:00. PM/AM yoxdur.</p>
+        </section>
+
+        <section class="checkout-section">
+          <div class="section-head">
+            <h2>3. Çatdırılma və ödəniş</h2>
+            <p>Bir toxunuşla seçim et.</p>
+          </div>
+
+          <fieldset class="option-group">
+            <legend>Çatdırılma üsulu</legend>
+            <div class="option-grid">
+              <label class="option-card">
+                <input type="radio" name="delivery" value="metro" checked />
+                <span class="option-title">Metroda təhvil</span>
+                <small>Qısa və rahat təhvil.</small>
+              </label>
+              <label class="option-card">
+                <input type="radio" name="delivery" value="address" />
+                <span class="option-title">Ünvana çatdırılma</span>
+                <small>Sifarişi ünvana gətirək.</small>
+              </label>
+            </div>
+          </fieldset>
+
+          <div class="checkout-grid compact-top">
+            <label id="metroField" class="checkout-field">
+              <span>Metro / rayon</span>
+              <input name="metro" autocomplete="address-level2" placeholder="Məsələn: 28 May" />
+            </label>
+            <label id="addressField" class="checkout-field hidden">
+              <span>Tam ünvan</span>
+              <input name="address" autocomplete="street-address" placeholder="Küçə, bina, mərtəbə, mənzil" />
+            </label>
+          </div>
+
+          <fieldset class="option-group compact-top">
+            <legend>Ödəniş üsulu</legend>
+            <div class="option-grid">
+              <label class="option-card">
+                <input type="radio" name="payment" value="cash" checked />
+                <span class="option-title">Nağd ödəniş</span>
+                <small>Çatdırılmada nağd ver.</small>
+              </label>
+              <label class="option-card">
+                <input type="radio" name="payment" value="card" />
+                <span class="option-title">Kartla ödəniş</span>
+                <small>Çatdırılma zamanı kartla ödə.</small>
+              </label>
+            </div>
+          </fieldset>
+        </section>
+
+        <button class="buy" type="submit">Sifarişi göndər</button>
+        <p id="message" role="alert" aria-live="assertive"></p>
+      </form>
+    </aside>
+
+    <div id="toast" class="store-toast" role="status" aria-live="polite"></div>
+    <script src="store.js"></script>
   </body>
 </html>

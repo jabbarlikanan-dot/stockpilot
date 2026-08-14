@@ -11,6 +11,8 @@
     <link rel="stylesheet" href="orders.css" />
     <link rel="stylesheet" href="shell.css" />
       <link rel="stylesheet" href="redesign.css" />
+    <link rel="stylesheet" href="v28.css" />
+    <link rel="stylesheet" href="v29.css" />
 </head>
   <body>
     <div class="app-shell">
@@ -31,13 +33,18 @@
       <main class="app-main">
         <header class="topbar">
           <span><b>İdarəetmə paneli</b> / Sifarişlər</span>
-          <div>
-            <button id="importBtn" class="secondary">Excel-dən əlavə et</button
-            ><button id="templateBtn" class="secondary">Nümunə Excel</button
-            ><button id="exportBtn" class="secondary">Excel ixracı</button
-            ><button id="storeBtn" class="secondary">Mağazam</button
-            ><button id="quoteBtn" class="secondary">Qiymət təklifi</button
-            ><div class="notification-menu"><button id="notificationButton" class="notification-button" aria-label="Bildirişlər" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg><b id="notificationBadge" class="notification-badge hidden">0</b></button><section id="notificationPopover" class="notification-popover hidden"><div class="notification-popover-head"><b>Bildirişlər</b><button id="readAllNotifications">Oxundu et</button></div><div id="notificationPreview" class="notification-preview"></div><a id="allNotifications" class="notification-all" href="#">Hamısına bax →</a></section></div
+          <div class="topbar-actions">
+            <button id="storeBtn" class="secondary topbar-key-action">Mağazam</button>
+            <details class="topbar-more">
+              <summary class="secondary">Daha çox</summary>
+              <div class="topbar-more-menu">
+                <button id="importBtn" class="secondary">Excel-dən əlavə et</button>
+                <button id="templateBtn" class="secondary">Nümunə Excel</button>
+                <button id="exportBtn" class="secondary">Excel ixracı</button>
+                <button id="quoteBtn" class="secondary">Qiymət təklifi</button>
+              </div>
+            </details>
+            <div class="notification-menu"><button id="notificationButton" class="notification-button" aria-label="Bildirişlər" aria-expanded="false"><svg viewBox="0 0 24 24"><path d="M18 9a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg><b id="notificationBadge" class="notification-badge hidden">0</b></button><section id="notificationPopover" class="notification-popover hidden"><div class="notification-popover-head"><b>Bildirişlər</b><button id="readAllNotifications">Oxundu et</button></div><div id="notificationPreview" class="notification-preview"></div><a id="allNotifications" class="notification-all" href="#">Hamısına bax →</a></section></div
             ><button id="profileBtn" class="profile" title="Profil ayarları">
               <b id="profileInitial">U</b><span id="profileName">Hesabım</span>
             </button>
@@ -52,6 +59,7 @@
           </div>
           <div class="heading-actions"><button id="archiveToggle" class="secondary">Arxiv</button><button id="newOrderTop" class="primary">+ Yeni sifariş</button></div>
         </section>
+        <section id="operationsHub" class="operations-hub" aria-live="polite"></section>
         <div id="tabs" class="tabs"></div>
         <section id="content"></section>
       </main>
@@ -82,5 +90,6 @@
     <script src="orders-bootstrap.js"></script>
     <script src="notifications.js"></script>
       <script src="redesign.js"></script>
+    <script src="v29.js"></script>
 </body>
 </html>

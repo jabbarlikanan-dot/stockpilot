@@ -37,6 +37,7 @@ state.ui = {
   productFormOpen: false,
   panel: "personal",
   customerView: "all",
+  customerLayout: "board",
   ...(state.ui || {}),
 };
 let pendingImage = "",
@@ -123,6 +124,7 @@ const dateTime = (v) =>
     ? new Intl.DateTimeFormat("az-AZ", {
         dateStyle: "short",
         timeStyle: "short",
+        hour12: false,
       }).format(new Date(v))
     : "—";
 const customerStatus = {
@@ -134,6 +136,12 @@ const customerStatus = {
   cancelled: "Ləğv edildi",
 };
 const terminalCustomerStatus = new Set(["delivered", "cancelled"]);
+const nextCustomerStatus = {
+  new: "confirmed",
+  confirmed: "preparing",
+  preparing: "courier",
+  courier: "delivered",
+};
 const phoneForWhatsApp = (value) => {
   const digits = String(value || "").replace(/\D/g, "");
   if (digits.startsWith("994")) return digits;
@@ -150,12 +158,16 @@ function customerOrderCard(order, compact = false) {
     .map(([key, label]) => `<option value="${key}" ${order.status === key ? "selected" : ""}>${label}</option>`)
     .join("");
   const selectedFromNotification = location.hash === `#order-${order.id}`;
-  return `<article id="order-${esc(order.id)}" class="customer-card ${terminalCustomerStatus.has(order.status) ? "done" : ""} ${selectedFromNotification ? "highlight" : ""}">
-    <div class="customer-card-main"><b>${esc(order.customer?.name)}</b><span>${esc(order.customer?.phone)} · ${money(order.total)} ₼</span>
+  const nextStatus = nextCustomerStatus[order.status];
+  const nextButton = nextStatus
+    ? `<button class="customer-quick-next" data-customer-next="${order.id}" data-next-status="${nextStatus}">${customerStatus[nextStatus]} →</button>`
+    : "";
+  return `<article id="order-${esc(order.id)}" class="customer-card status-${esc(order.status)} ${terminalCustomerStatus.has(order.status) ? "done" : ""} ${selectedFromNotification ? "highlight" : ""}">
+    <div class="customer-card-main"><span class="customer-card-status">${esc(customerStatus[order.status] || "Yeni")}</span><b>${esc(order.customer?.name)}</b><span>${esc(order.customer?.phone)} · ${money(order.total)} ₼</span>
     <small>${(order.cart || []).map((item) => `${esc(item.name)} × ${item.quantity}`).join(", ")}${order.customer?.note ? ` — ${esc(order.customer.note)}` : ""}</small>
     <small>${dateTime(order.createdAt)}${order.customer?.delivery ? ` · ${esc(order.customer.delivery === "metro" ? "Metro təhvil" : "Ünvana çatdırılma")}` : ""}${order.customer?.preferredAt ? ` · İstədiyi vaxt: ${dateTime(order.customer.preferredAt)}` : ""}</small></div>
-    <div class="customer-actions"><select data-customer-status="${order.id}" ${order.status === "delivered" ? "disabled" : ""}>${statusOptions}</select>
-    <button class="edit" data-customer-edit="${order.id}">Redaktə</button><a class="whatsapp" data-customer-whatsapp="${order.id}" href="${whatsappLink(order)}" target="_blank" rel="noopener">WhatsApp</a><button class="remove" data-customer-delete="${order.id}">Sil</button></div>
+    <div class="customer-actions">${nextButton}<select data-customer-status="${order.id}" ${order.status === "delivered" ? "disabled" : ""}>${statusOptions}</select>
+    <button class="edit" data-customer-edit="${order.id}">Detallar</button><a class="whatsapp" data-customer-whatsapp="${order.id}" href="${whatsappLink(order)}" target="_blank" rel="noopener">WhatsApp</a><button class="remove" data-customer-delete="${order.id}">Sil</button></div>
   </article>`;
 }
 function calc(i) {
@@ -311,6 +323,14 @@ function bindCustomerOrderActions() {
     if (result.whatsappUrl && confirm("Müştəriyə WhatsApp status mesajı açılsın?")) window.open(result.whatsappUrl, "_blank", "noopener");
     await refreshCustomerOrders();
     hideModal();
+    render();
+  }));
+  document.querySelectorAll("[data-customer-next]").forEach((button) => (button.onclick = async () => {
+    const id = button.dataset.customerNext;
+    const status = button.dataset.nextStatus;
+    const response = await fetch(`/api/customer-orders/${id}`, { method: "PUT", headers: { "content-type": "application/json", Authorization: `Bearer ${localStorage.stockpilotToken}` }, body: JSON.stringify({ status }) });
+    if (!response.ok) return notify("Status yadda saxlanmadı.", "error");
+    await refreshCustomerOrders();
     render();
   }));
   document.querySelectorAll("[data-customer-edit]").forEach((button) => (button.onclick = () => editCustomerOrder(button.dataset.customerEdit)));
@@ -500,41 +520,48 @@ function compactPanels(order) {
     editing !== null || !order.items?.length || state.ui.productFormOpen,
   );
 }
+function renderOperationsHub() {
+  const root = document.getElementById("operationsHub");
+  if (!root) return;
+  const stockItems = state.orders
+    .filter((order) => !order.archived)
+    .flatMap((order) => (order.items || []).map((item) => ({ order, item })))
+    .filter(({ item }) => remainingQty(item) > 0);
+  const risky = stockItems.filter(({ item }) => remainingQty(item) <= Math.max(0, Number(item.minStock || 0)));
+  const critical = risky.filter(({ item }) => remainingQty(item) <= Math.max(1, Math.floor(Number(item.minStock || 0) / 2)));
+  const newCustomers = state.customerOrders.filter((order) => order.status === "new");
+  const inProgress = state.customerOrders.filter((order) => ["confirmed", "preparing", "courier"].includes(order.status));
+  const activeOrders = state.orders.filter((order) => !order.archived).length;
+  const queue = [];
+  if (critical.length) queue.push(`<a class="ops-action" href="inventory.html"><span><b>${critical.length} kritik stok</b><small>Stok bitmədən yoxla</small></span><strong>Aç →</strong></a>`);
+  if (newCustomers.length) queue.push(`<a class="ops-action" href="customer-orders.html"><span><b>${newCustomers.length} yeni müştəri sifarişi</b><small>Təsdiq gözləyir</small></span><strong>Bax →</strong></a>`);
+  if (inProgress.length) queue.push(`<a class="ops-action" href="customer-orders.html"><span><b>${inProgress.length} aktiv çatdırılma</b><small>Statusları idarə et</small></span><strong>İdarə et →</strong></a>`);
+  root.innerHTML = `<section class="ops-primary"><span class="ops-label">BU GÜN NƏ VACİBDİR?</span><h2>İş mərkəzi</h2><p>Ən vacib əməliyyatları bir baxışda gör və birbaşa hərəkət et.</p><div class="ops-metrics"><a class="ops-metric" href="customer-orders.html"><span>Yeni sifariş</span><b>${newCustomers.length}</b></a><a class="ops-metric ${risky.length ? "is-risk" : ""}" href="inventory.html"><span>Riskli stok</span><b>${risky.length}</b></a><a class="ops-metric" href="#tabs"><span>Aktiv şəxsi sifariş</span><b>${activeOrders}</b></a></div></section><section class="ops-queue"><div class="ops-queue-head"><b>Action queue</b><span class="ops-label">PRİORİTET</span></div>${queue.length ? queue.join("") : '<div class="ops-clear">Hazırda təcili əməliyyat yoxdur ✓</div>'}</section>`;
+}
+
 function renderCustomerPanel() {
   const counts = Object.fromEntries(
-    Object.keys(customerStatus).map((status) => [
-      status,
-      state.customerOrders.filter((order) => order.status === status).length,
-    ]),
+    Object.keys(customerStatus).map((status) => [status, state.customerOrders.filter((order) => order.status === status).length]),
   );
-  const shown = state.ui.customerView === "all"
-    ? state.customerOrders
-    : state.customerOrders.filter((order) => order.status === state.ui.customerView);
-  const filterButton = (value, label, count) =>
-    `<button class="${state.ui.customerView === value ? "primary" : "secondary"}" data-customer-filter="${value}">${label} (${count})</button>`;
-  $("content").innerHTML = `<section class="box customer-orders customer-panel"><div class="customer-heading"><div><h2>Müştəri sifarişləri</h2><p>${state.customerOrders.length} ümumi sifariş · səhifə açıq olduqda avtomatik yenilənir.</p></div><div class="customer-actions"><button id="refreshCustomerOrders" class="secondary">Yenilə</button><button id="customerHistory" class="secondary">Tarixçə</button></div></div><div class="customer-filters">${filterButton("all", "Hamısı", state.customerOrders.length)}${filterButton("new", "Yeni", counts.new)}${filterButton("confirmed", "Təsdiqləndi", counts.confirmed)}${filterButton("preparing", "Hazırlanır", counts.preparing)}${filterButton("courier", "Kuryerdə", counts.courier)}${filterButton("delivered", "Tamamlandı", counts.delivered)}${filterButton("cancelled", "Ləğv edildi", counts.cancelled)}</div>${shown.length ? shown.map((order) => customerOrderCard(order)).join("") : '<p class="hint">Bu filtr üçün sifariş yoxdur.</p>'}</section>`;
-  if (location.hash.startsWith("#order-")) {
-    requestAnimationFrame(() => document.getElementById(location.hash.slice(1))?.scrollIntoView({ behavior: "smooth", block: "center" }));
-  }
+  const shown = state.ui.customerView === "all" ? state.customerOrders : state.customerOrders.filter((order) => order.status === state.ui.customerView);
+  const filterButton = (value, label, count) => `<button class="${state.ui.customerView === value ? "primary" : "secondary"}" data-customer-filter="${value}">${label} (${count})</button>`;
+  const boardStatuses = ["new", "confirmed", "preparing", "courier"];
+  const board = `<div class="customer-board">${boardStatuses.map((status) => {
+    const list = state.customerOrders.filter((order) => order.status === status);
+    return `<section class="customer-column"><div class="customer-column-head"><b>${customerStatus[status]}</b><span>${list.length}</span></div>${list.length ? list.map((order) => customerOrderCard(order, true)).join("") : '<p class="hint">Boşdur</p>'}</section>`;
+  }).join("")}</div>`;
+  const list = `<div class="customer-list-wrap">${shown.length ? shown.map((order) => customerOrderCard(order)).join("") : '<p class="hint">Bu filtr üçün sifariş yoxdur.</p>'}</div>`;
+  $("content").innerHTML = `<section class="box customer-orders customer-panel"><div class="customer-heading"><div><h2>Müştəri sifarişləri</h2><p>${state.customerOrders.length} ümumi sifariş · statusları bir kliklə irəli apar.</p></div><div class="customer-actions"><div class="customer-view-switch"><button class="${state.ui.customerLayout === "board" ? "primary" : "secondary"}" data-customer-layout="board">Board</button><button class="${state.ui.customerLayout === "list" ? "primary" : "secondary"}" data-customer-layout="list">Siyahı</button></div><button id="refreshCustomerOrders" class="secondary">Yenilə</button><button id="customerHistory" class="secondary">Tarixçə</button></div></div><div class="customer-filters">${filterButton("all", "Hamısı", state.customerOrders.length)}${filterButton("new", "Yeni", counts.new)}${filterButton("confirmed", "Təsdiqləndi", counts.confirmed)}${filterButton("preparing", "Hazırlanır", counts.preparing)}${filterButton("courier", "Kuryerdə", counts.courier)}${filterButton("delivered", "Tamamlandı", counts.delivered)}${filterButton("cancelled", "Ləğv edildi", counts.cancelled)}</div>${state.ui.customerLayout === "board" && state.ui.customerView === "all" ? board : list}</section>`;
+  if (location.hash.startsWith("#order-")) requestAnimationFrame(() => document.getElementById(location.hash.slice(1))?.scrollIntoView({ behavior: "smooth", block: "center" }));
   if ($("customerHistory")) $("customerHistory").onclick = customerHistory;
-  if ($("refreshCustomerOrders")) $("refreshCustomerOrders").onclick = async () => {
-    try {
-      await refreshCustomerOrders();
-      render();
-    } catch {
-      notify("Sifarişlər yenilənmədi. Giriş sessiyasını yeniləyin.");
-    }
-  };
-  document.querySelectorAll("[data-customer-filter]").forEach((button) => {
-    button.onclick = () => {
-      state.ui.customerView = button.dataset.customerFilter;
-      render();
-    };
-  });
+  if ($("refreshCustomerOrders")) $("refreshCustomerOrders").onclick = async () => { try { await refreshCustomerOrders(); render(); } catch { notify("Sifarişlər yenilənmədi. Giriş sessiyasını yeniləyin."); } };
+  document.querySelectorAll("[data-customer-layout]").forEach((button) => button.onclick = () => { state.ui.customerLayout = button.dataset.customerLayout; render(); });
+  document.querySelectorAll("[data-customer-filter]").forEach((button) => button.onclick = () => { state.ui.customerView = button.dataset.customerFilter; if (state.ui.customerView !== "all") state.ui.customerLayout = "list"; render(); });
   bindCustomerOrderActions();
 }
 function render() {
   if (isCustomerPage) return renderCustomerPanel();
+  renderOperationsHub();
   if (!state.orders.length) return newOrder();
   $("archiveToggle").textContent = state.ui.showArchived
     ? "Aktiv sifarişlər"

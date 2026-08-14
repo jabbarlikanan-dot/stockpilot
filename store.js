@@ -3,9 +3,11 @@ let products = [];
 let cart = [];
 let category = "Hamısı";
 let visibleProducts = 12;
+let productQuery = "";
 const $ = (id) => document.getElementById(id);
 const money = (n) => `${(Number(n) || 0).toLocaleString("az-AZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₼`;
 const esc = (s) => String(s || "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[m]);
+const QUICK_TIMES = ["09:00", "11:00", "13:00", "15:00", "17:00", "19:00", "21:00"];
 
 function showToast(text) {
   const toast = $("toast");
@@ -20,25 +22,113 @@ function localDate() {
 }
 function localTime() {
   const now = new Date();
-  now.setMinutes(now.getMinutes() + 30, 0, 0);
+  now.setMinutes(Math.ceil((now.getMinutes() + 30) / 30) * 30, 0, 0);
   return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
 }
+function addDays(dateString, days) {
+  const d = new Date(`${dateString}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+function formatDayLabel(dateString) {
+  const d = new Date(`${dateString}T00:00:00`);
+  return new Intl.DateTimeFormat("az-AZ", { weekday: "short", day: "2-digit", month: "2-digit" }).format(d);
+}
+function buildTimeOptions() {
+  const select = $("preferredTime");
+  const options = [];
+  for (let hour = 8; hour <= 22; hour += 1) {
+    for (const minute of [0, 30]) {
+      if (hour === 22 && minute > 0) continue;
+      const value = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+      options.push(`<option value="${value}">${value}</option>`);
+    }
+  }
+  select.innerHTML = options.join("");
+}
 function setupSchedule() {
-  $("preferredDate").min = localDate();
-  $("preferredDate").value = localDate();
-  $("preferredTime").value = localTime();
+  buildTimeOptions();
+  const today = localDate();
+  $("preferredDate").min = today;
+  $("preferredDate").value = today;
+  const preferred = $("preferredTime");
+  const defaultTime = localTime();
+  preferred.value = Array.from(preferred.options).some((option) => option.value === defaultTime) ? defaultTime : "10:00";
+  renderDateChoices();
+  renderTimeChoices();
+}
+function renderDateChoices() {
+  const dateInput = $("preferredDate");
+  const today = localDate();
+  const choices = [
+    { label: "Bu gün", value: today },
+    { label: "Sabah", value: addDays(today, 1) },
+    { label: "Birigün", value: addDays(today, 2) },
+  ];
+  $("dateChoices").innerHTML = choices.map((choice) => `
+    <button type="button" class="choice-chip ${dateInput.value === choice.value ? "active" : ""}" data-date-choice="${choice.value}">
+      ${choice.label} · ${formatDayLabel(choice.value)}
+    </button>`).join("");
+  document.querySelectorAll("[data-date-choice]").forEach((button) => {
+    button.onclick = () => {
+      dateInput.value = button.dataset.dateChoice;
+      renderDateChoices();
+    };
+  });
+}
+function renderTimeChoices() {
+  const timeSelect = $("preferredTime");
+  $("timeChoices").innerHTML = QUICK_TIMES.map((time) => `
+    <button type="button" class="choice-chip ${timeSelect.value === time ? "active" : ""}" data-time-choice="${time}">${time}</button>
+  `).join("");
+  document.querySelectorAll("[data-time-choice]").forEach((button) => {
+    button.onclick = () => {
+      timeSelect.value = button.dataset.timeChoice;
+      renderTimeChoices();
+    };
+  });
+}
+function filteredProducts() {
+  return products.filter((product) => {
+    const matchesCategory = category === "Hamısı" || product.category === category;
+    const haystack = `${product.name || ""} ${product.category || ""}`.toLocaleLowerCase("az");
+    const matchesQuery = !productQuery || haystack.includes(productQuery);
+    return matchesCategory && matchesQuery;
+  });
 }
 function render() {
   const categories = ["Hamısı", ...new Set(products.map((product) => product.category || "Digər"))];
   $("categories").innerHTML = categories.map((name) => `<button class="${name === category ? "active" : ""}" data-category="${esc(name)}">${esc(name)}</button>`).join("");
-  const shown = products.filter((product) => category === "Hamısı" || product.category === category);
+  const shown = filteredProducts();
+  $("productCount").textContent = `${shown.length} məhsul`;
   const visible = shown.slice(0, visibleProducts);
   $("products").innerHTML = (visible.map((product) => {
-    const available = Number(product.quantity) > 0;
-    return `<article class="product ${available ? "" : "out-of-stock"}">${product.image ? `<img src="${product.image}" alt="${esc(product.name)}" loading="lazy" decoding="async" fetchpriority="low">` : '<div class="placeholder">Şəkil yoxdur</div>'}<small>${esc(product.category)}</small><h2>${esc(product.name)}</h2><footer><span class="price">${money(product.price)}</span><button data-add="${esc(product.id)}" ${available ? "" : "disabled"}>${available ? "Səbətə" : "Stokda yoxdur"}</button></footer></article>`;
-  }).join("") || "<p>Məhsul hələ əlavə edilməyib.</p>") + (shown.length > visible.length ? `<button id="loadMore" class="load-more">Daha çox məhsul göstər (${shown.length - visible.length})</button>` : "");
+    const quantity = Number(product.quantity) || 0;
+    const available = quantity > 0;
+    return `
+      <article class="product ${available ? "" : "out-of-stock"}">
+        <div class="product-media">
+          ${product.image ? `<img src="${product.image}" alt="${esc(product.name)}" loading="lazy" decoding="async" fetchpriority="low">` : '<div class="placeholder">Şəkil yoxdur</div>'}
+        </div>
+        <div class="product-meta">
+          <small>${esc(product.category || "Digər")}</small>
+          <span class="stock-badge">${available ? `Stokda ${quantity}` : "Stokda yoxdur"}</span>
+        </div>
+        <h2>${esc(product.name)}</h2>
+        <footer>
+          <span class="price">${money(product.price)}</span>
+          <button data-add="${esc(product.id)}" ${available ? "" : "disabled"}>${available ? "Səbətə əlavə et" : "Stokda yoxdur"}</button>
+        </footer>
+      </article>`;
+  }).join("") || '<p class="cart-empty">Bu axtarışa uyğun məhsul tapılmadı.</p>')
+    + (shown.length > visible.length ? `<button id="loadMore" class="load-more">Daha çox məhsul göstər (${shown.length - visible.length})</button>` : "");
+
   document.querySelectorAll("[data-category]").forEach((button) => {
-    button.onclick = () => { category = button.dataset.category; visibleProducts = 12; render(); };
+    button.onclick = () => {
+      category = button.dataset.category;
+      visibleProducts = 12;
+      render();
+    };
   });
   document.querySelectorAll("[data-add]").forEach((button) => {
     button.onclick = () => {
@@ -48,7 +138,9 @@ function render() {
       if (line) {
         if (line.quantity >= line.maxQuantity) return showToast("Stokda daha çox məhsul yoxdur.");
         line.quantity += 1;
-      } else cart.push({ ...product, maxQuantity: Number(product.quantity), quantity: 1 });
+      } else {
+        cart.push({ ...product, maxQuantity: Number(product.quantity), quantity: 1 });
+      }
       renderCart();
       showToast("Məhsul səbətə əlavə edildi ✓");
     };
@@ -57,16 +149,33 @@ function render() {
   if (loadMore) loadMore.onclick = () => { visibleProducts += 12; render(); };
 }
 function renderCart() {
-  $("cartCount").textContent = cart.reduce((sum, item) => sum + item.quantity, 0);
-  $("cartLines").innerHTML = cart.map((item) => `<div class="line"><span><b>${esc(item.name)}</b><small>${money(item.price)} × ${item.quantity}</small></span><span><button data-minus="${esc(item.id)}" aria-label="Azalt">−</button><button data-plus="${esc(item.id)}" aria-label="Artır">+</button></span></div>`).join("") || '<p class="cart-empty">Səbət boşdur.</p>';
+  const itemsCount = cart.reduce((sum, item) => sum + item.quantity, 0);
+  const total = cart.reduce((sum, item) => sum + (Number(item.price) || 0) * item.quantity, 0);
+  $("cartCount").textContent = itemsCount;
+  $("cartItemsSummary").textContent = `${itemsCount} məhsul`;
+  $("cartTotalSummary").textContent = money(total);
+  $("cartLines").innerHTML = cart.map((item) => `
+    <div class="line">
+      <span class="line-main">
+        <b>${esc(item.name)}</b>
+        <small>${money(item.price)} × ${item.quantity}</small>
+      </span>
+      <span class="qty-controls">
+        <button data-minus="${esc(item.id)}" aria-label="Azalt">−</button>
+        <button data-plus="${esc(item.id)}" aria-label="Artır">+</button>
+      </span>
+    </div>`).join("") || '<p class="cart-empty">Səbət boşdur. Məhsul əlavə etdikdən sonra checkout burada görünəcək.</p>';
+
   document.querySelectorAll("[data-minus]").forEach((button) => button.onclick = () => {
     const item = cart.find((line) => line.id === button.dataset.minus);
+    if (!item) return;
     item.quantity -= 1;
     if (!item.quantity) cart = cart.filter((line) => line !== item);
     renderCart();
   });
   document.querySelectorAll("[data-plus]").forEach((button) => button.onclick = () => {
     const item = cart.find((line) => line.id === button.dataset.plus);
+    if (!item) return;
     if (item.quantity < item.maxQuantity) item.quantity += 1;
     else showToast("Stokda daha çox məhsul yoxdur.");
     renderCart();
@@ -74,7 +183,10 @@ function renderCart() {
 }
 async function boot() {
   setupSchedule();
-  if (!shop) { $("shopName").textContent = "Mağaza linki düzgün deyil"; return; }
+  if (!shop) {
+    $("shopName").textContent = "Mağaza linki düzgün deyil";
+    return;
+  }
   try {
     const response = await fetch(`/api/store/${encodeURIComponent(shop)}`);
     const data = await response.json().catch(() => ({}));
@@ -82,8 +194,11 @@ async function boot() {
     products = data.products || [];
     $("shopName").textContent = `${data.shop.name} mağazası`;
     $("shopTag").textContent = "STOCKPILOT MAĞAZA";
-    render(); renderCart();
-  } catch (error) { $("shopName").textContent = error.message || "Mağaza yüklənmədi"; }
+    render();
+    renderCart();
+  } catch (error) {
+    $("shopName").textContent = error.message || "Mağaza yüklənmədi";
+  }
 }
 function setCartOpen(open) {
   $("cart").classList.toggle("hidden", !open);
@@ -96,36 +211,69 @@ function setCartOpen(open) {
 $("cartButton").onclick = () => setCartOpen(true);
 $("closeCart").onclick = () => setCartOpen(false);
 $("cartBackdrop").onclick = () => setCartOpen(false);
-document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !$("cart").classList.contains("hidden")) setCartOpen(false); });
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !$("cart").classList.contains("hidden")) setCartOpen(false);
+});
+$("productSearch").addEventListener("input", (event) => {
+  productQuery = String(event.target.value || "").trim().toLocaleLowerCase("az");
+  visibleProducts = 12;
+  render();
+});
+$("preferredDate").addEventListener("change", renderDateChoices);
+$("preferredTime").addEventListener("change", renderTimeChoices);
+
 function syncDeliveryFields() {
-  const address = $("deliveryMethod").value === "address";
+  const delivery = document.querySelector('input[name="delivery"]:checked')?.value || "metro";
+  const address = delivery === "address";
   $("addressField").classList.toggle("hidden", !address);
   $("metroField").classList.toggle("hidden", address);
   $("addressField").querySelector("input").required = address;
   $("metroField").querySelector("input").required = !address;
 }
-$("deliveryMethod").onchange = syncDeliveryFields;
+document.querySelectorAll('input[name="delivery"]').forEach((input) => input.addEventListener("change", syncDeliveryFields));
 syncDeliveryFields();
+
 $("checkout").onsubmit = async (event) => {
   event.preventDefault();
-  const message = $("message"); message.textContent = "";
-  if (!cart.length) { message.textContent = "Səbət boşdur."; setCartOpen(true); return; }
+  const message = $("message");
+  message.textContent = "";
+  if (!cart.length) {
+    message.textContent = "Səbət boşdur.";
+    setCartOpen(true);
+    return;
+  }
   const form = new FormData(event.currentTarget);
   const date = String(form.get("preferredDate") || "");
   const time = String(form.get("preferredTime") || "");
-  if (date < localDate()) { message.textContent = "Keçmiş tarix seçilə bilməz."; return; }
-  if (!/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/.test(time)) { message.textContent = "Saatı 24 saat formatında yazın: 14:30"; return; }
+  if (date < localDate()) {
+    message.textContent = "Keçmiş tarix seçilə bilməz.";
+    return;
+  }
+  if (!/^(?:[01][0-9]|2[0-3]):[0-5][0-9]$/.test(time)) {
+    message.textContent = "Saatı 24 saat formatında seçin. Məsələn: 14:30";
+    return;
+  }
   const body = Object.fromEntries(form);
   body.preferredAt = `${date}T${time}:00`;
   body.cart = cart.map(({ id, quantity }) => ({ id, quantity }));
-  const submit = event.currentTarget.querySelector("button[type=submit]");
-  submit.disabled = true; submit.textContent = "Göndərilir…";
+  const submit = event.currentTarget.querySelector('button[type="submit"]');
+  submit.disabled = true;
+  submit.textContent = "Göndərilir…";
   try {
-    const response = await fetch(`/api/store/${encodeURIComponent(shop)}/orders`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
+    const response = await fetch(`/api/store/${encodeURIComponent(shop)}/orders`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(body),
+    });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || "Sifariş göndərilmədi.");
     location.assign(`order-success.html?shop=${encodeURIComponent(shop)}&id=${encodeURIComponent(data.orderId || "")}`);
-  } catch (error) { message.textContent = error.message || "Xəta oldu. Yenidən cəhd edin."; }
-  finally { submit.disabled = false; submit.textContent = "Sifarişi göndər"; }
+  } catch (error) {
+    message.textContent = error.message || "Xəta oldu. Yenidən cəhd edin.";
+  } finally {
+    submit.disabled = false;
+    submit.textContent = "Sifarişi göndər";
+  }
 };
+
 boot();

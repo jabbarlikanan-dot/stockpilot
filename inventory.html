@@ -9,6 +9,8 @@
     <link rel="stylesheet" href="shell.css" />
     <title>Stok nəzarəti — StockPilot</title>
       <link rel="stylesheet" href="redesign.css" />
+    <link rel="stylesheet" href="v28.css" />
+    <link rel="stylesheet" href="v29.css" />
 </head>
   <body>
     <div class="app-shell">
@@ -27,12 +29,22 @@
         <header class="top"><span>İdarəetmə paneli / Stok</span><div id="user" class="user"></div></header>
         <section class="page-title"><h1>Stok nəzarəti</h1><p>Qalan məhsulları bir yerdən yoxla, sayı dəyiş və satışa keçir.</p></section>
         <section id="inventoryStats" class="stats inventory-stats"></section>
-        <section class="card inventory-toolbar"><input id="search" placeholder="Məhsul və ya sifariş üzrə axtar…" /><label><input id="onlyLow" type="checkbox" /> Yalnız az qalanlar</label></section>
+        <section class="card inventory-toolbar inventory-toolbar-v28">
+          <input id="search" placeholder="Məhsul və ya sifariş üzrə axtar…" />
+          <div id="healthFilters" class="health-filters" aria-label="Stok sağlamlığı">
+            <button class="active" data-health="all">Hamısı</button>
+            <button data-health="critical">Kritik</button>
+            <button data-health="low">Az qalan</button>
+            <button data-health="healthy">Sağlam</button>
+          </div>
+          <label class="legacy-low-filter"><input id="onlyLow" type="checkbox" /> Yalnız az qalanlar</label>
+        </section>
         <section id="inventory" class="inventory-grid"></section>
       </main>
     </div>
     <nav class="mobile-bottom" aria-label="Sürətli menyu"><a href="dashboard.html"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h8M8 17h5"/></svg><span>Sifarişlər</span></a><a href="customer-orders.html"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="9" r="3"/><circle cx="17" cy="10" r="2"/><path d="M3 20c.7-3.2 2.7-5 6-5 3.4 0 5.5 1.8 6.1 5"/></svg><span>Müştəri</span></a><a class="active" href="inventory.html"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h16v12H4zM8 8V5h8v3M8 13h8"/></svg><span>Stok</span></a><a href="account.html"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3"/><path d="M5 20c.6-3.4 2.9-5 7-5s6.4 1.6 7 5"/></svg><span>Hesab</span></a></nav>
     <script src="shell.js"></script><script src="inventory.js"></script>
       <script src="redesign.js"></script>
+    <script src="v29.js"></script>
 </body>
 </html>

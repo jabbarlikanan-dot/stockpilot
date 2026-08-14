@@ -5,6 +5,7 @@ const money = (n) => `${Number(n || 0).toLocaleString("az-AZ", { minimumFraction
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[m]));
 let state = { orders: [] };
 let user;
+let healthFilter = "all";
 const logout = () => { localStorage.removeItem("stockpilotToken"); location.href = "index.html"; };
 const toast = (message, type = "info") => window.StockPilotUI?.toast(message, type);
 
@@ -53,14 +54,23 @@ function render() {
   const search = document.getElementById("search").value.toLowerCase().trim();
   const lowOnly = document.getElementById("onlyLow").checked;
   const entries = allItems();
+  const healthOf = (item) => {
+    const left = remaining(item);
+    const min = Math.max(0, Number(item.minStock || 0));
+    if (left <= Math.max(1, Math.floor(min / 2))) return "critical";
+    if (left <= min) return "low";
+    return "healthy";
+  };
   const low = entries.filter(({ item }) => remaining(item) <= Number(item.minStock || 0));
   const favourite = entries.filter(({ item }) => item.favorite);
   document.getElementById("inventoryStats").innerHTML = `<article class="card"><span>Aktiv stok</span><b>${entries.reduce((sum, { item }) => sum + remaining(item), 0)} ədəd</b></article><article class="card"><span>Az qalan məhsul</span><b class="danger-value">${low.length}</b></article><article class="card"><span>Favorilər</span><b>${favourite.length}</b></article><article class="card"><span>Stokun alış dəyəri</span><b>${money(entries.reduce((sum, { item }) => sum + remaining(item) * Number(item.price || 0), 0))}</b></article>`;
-  const shown = entries.filter(({ item, order }) => (!search || `${item.name || ""} ${order.name || ""}`.toLowerCase().includes(search)) && (!lowOnly || remaining(item) <= Number(item.minStock || 0)));
+  const shown = entries.filter(({ item, order }) => (!search || `${item.name || ""} ${order.name || ""}`.toLowerCase().includes(search)) && (!lowOnly || remaining(item) <= Number(item.minStock || 0)) && (healthFilter === "all" || healthOf(item) === healthFilter));
   document.getElementById("inventory").innerHTML = shown.length ? shown.map(({ order, item, index }) => {
     const isLow = remaining(item) <= Number(item.minStock || 0);
     const image = item.img || item.image || "";
-    return `<article class="card stock-card ${isLow ? "is-low" : ""}"><div class="stock-photo">${image ? `<img src="${esc(image)}" alt="${esc(item.name || "Məhsul")}">` : "▦"}</div><div class="stock-copy"><small>${esc(order.name || "Sifariş")} · ${esc(item.category || "Digər")}</small><h3>${item.favorite ? "★ " : ""}${esc(item.name || "Adsız məhsul")}</h3><p>${isLow ? `⚠ Minimum hədd: ${Number(item.minStock || 0)} ədəd` : `Minimum hədd: ${Number(item.minStock || 0)} ədəd`}</p></div><div class="stock-actions"><div class="qty-stepper"><button data-minus="${esc(order.id)}:${index}" aria-label="Stoku azalt">−</button><b>${remaining(item)}</b><button data-plus="${esc(order.id)}:${index}" aria-label="Stoku artır">+</button></div><button class="secondary" data-sold="${esc(order.id)}:${index}">Satış əlavə et</button></div></article>`;
+    const health = healthOf(item);
+    const healthLabel = health === "critical" ? "Kritik stok" : health === "low" ? "Az qalıb" : "Sağlam stok";
+    return `<article class="card stock-card ${isLow ? "is-low" : ""} health-${health}"><div class="stock-photo">${image ? `<img src="${esc(image)}" alt="${esc(item.name || "Məhsul")}">` : "▦"}</div><div class="stock-copy"><span class="stock-health ${health}">${healthLabel}</span><small>${esc(order.name || "Sifariş")} · ${esc(item.category || "Digər")}</small><h3>${item.favorite ? "★ " : ""}${esc(item.name || "Adsız məhsul")}</h3><p>${isLow ? `⚠ Minimum hədd: ${Number(item.minStock || 0)} ədəd` : `Minimum hədd: ${Number(item.minStock || 0)} ədəd`}</p></div><div class="stock-actions"><div class="qty-stepper"><button data-minus="${esc(order.id)}:${index}" aria-label="Stoku azalt">−</button><b>${remaining(item)}</b><button data-plus="${esc(order.id)}:${index}" aria-label="Stoku artır">+</button></div><button class="secondary" data-sold="${esc(order.id)}:${index}">Satış əlavə et</button></div></article>`;
   }).join("") : `<div class="card empty-state">${search || lowOnly ? "Filterə uyğun stok məhsulu yoxdur." : "Aktiv stokda məhsul yoxdur."}</div>`;
   document.querySelectorAll("[data-plus],[data-minus],[data-sold]").forEach((button) => {
     button.onclick = async () => {
@@ -91,6 +101,11 @@ async function boot() {
   paintUser(); render();
   document.getElementById("search").oninput = render;
   document.getElementById("onlyLow").onchange = render;
+  document.querySelectorAll("[data-health]").forEach((button) => button.onclick = () => {
+    healthFilter = button.dataset.health;
+    document.querySelectorAll("[data-health]").forEach((item) => item.classList.toggle("active", item === button));
+    render();
+  });
   document.getElementById("logout").onclick = logout;
 }
 boot().catch(() => logout());
