@@ -7,6 +7,7 @@
   --text: #f2f6ed;
   --muted: #a0aa98;
   --red: #ff9aa6;
+  --font-ui: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
 }
 * {
   box-sizing: border-box;
@@ -15,9 +16,9 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--text);
-  font:
-    14px Arial,
-    sans-serif;
+  font: 14px/1.5 var(--font-ui);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
 }
 .shell {
   min-height: 100vh;
@@ -66,7 +67,7 @@ body {
   text-align: left;
   background: transparent;
   color: #aeb8a6;
-  font: 700 14px Arial;
+  font: 700 14px/1.2 var(--font-ui);
   cursor: pointer;
 }
 .sidebar nav button.active,
@@ -81,7 +82,7 @@ body {
   padding: 12px;
   text-align: left;
   color: #aeb8a6;
-  font: 700 14px Arial;
+  font: 700 14px/1.2 var(--font-ui);
   text-decoration: none;
 }
 .sidebar nav .nav-link:hover { background: #252d1e; color: var(--lime); }
@@ -141,7 +142,7 @@ main {
 button {
   border: 0;
   border-radius: 9px;
-  font: 700 13px Arial;
+  font: 700 13px/1.2 var(--font-ui);
   cursor: pointer;
 }
 .primary {
@@ -274,7 +275,7 @@ button {
 .customer-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }
 .customer-actions select { width: 132px; }
 .customer-actions .edit, .customer-actions .remove, .customer-actions .whatsapp { padding: 8px 10px; margin: 0; }
-.whatsapp { display: inline-flex; align-items: center; text-decoration: none; border-radius: 8px; font: 700 12px Arial; background: #173b2a; color: #d5ffe1; }
+.whatsapp { display: inline-flex; align-items: center; text-decoration: none; border-radius: 8px; font: 700 12px/1.2 var(--font-ui); background: #173b2a; color: #d5ffe1; }
 .customer-history { display: grid; gap: 10px; max-height: 65vh; overflow: auto; padding-right: 3px; }
 .mobile-bottom { display: none; }
 @media (max-width: 900px) {
@@ -691,7 +692,7 @@ select:focus {
   }
 }
 .brand-mark {
-  font-family: Arial, sans-serif;
+  font-family: var(--font-ui);
   font-size: 21px;
   line-height: 1;
 }

@@ -39,8 +39,13 @@
     document.getElementById("readAllNotifications").onclick = markAll;
     document.getElementById("allNotifications").onclick = openAll;
     document.addEventListener("click", (event) => { if (!event.target.closest(".notification-menu")) popover.classList.add("hidden"); });
-    load();
-    setInterval(load, 45000);
+    // Bildirişlər ilk ekranı ləngitməsin; əsas panel çəkiləndən sonra yüklənir.
+    const deferLoad = () => {
+      if ("requestIdleCallback" in window) requestIdleCallback(() => load(), { timeout: 1200 });
+      else setTimeout(load, 600);
+    };
+    deferLoad();
+    setInterval(load, 90000);
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot); else boot();
 })();

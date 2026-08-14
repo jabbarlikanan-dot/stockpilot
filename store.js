@@ -2,6 +2,7 @@ const shop = new URLSearchParams(location.search).get("shop");
 let products = [];
 let cart = [];
 let category = "Hamısı";
+let visibleProducts = 12;
 const $ = (id) => document.getElementById(id);
 const money = (n) => `${(Number(n) || 0).toLocaleString("az-AZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₼`;
 const esc = (s) => String(s || "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[m]);
@@ -31,9 +32,10 @@ function render() {
   const categories = ["Hamısı", ...new Set(products.map((product) => product.category || "Digər"))];
   $("categories").innerHTML = categories.map((name) => `<button class="${name === category ? "active" : ""}" data-category="${esc(name)}">${esc(name)}</button>`).join("");
   const shown = products.filter((product) => category === "Hamısı" || product.category === category);
-  $("products").innerHTML = shown.map((product) => `<article class="product">${product.image ? `<img src="${product.image}" alt="${esc(product.name)}">` : '<div class="placeholder">Şəkil yoxdur</div>'}<small>${esc(product.category)}</small><h2>${esc(product.name)}</h2><footer><span class="price">${money(product.price)}</span><button data-add="${esc(product.id)}">Səbətə</button></footer></article>`).join("") || "<p>Məhsul hazırda yoxdur.</p>";
+  const visible = shown.slice(0, visibleProducts);
+  $("products").innerHTML = (visible.map((product) => `<article class="product">${product.image ? `<img src="${product.image}" alt="${esc(product.name)}" loading="lazy" decoding="async" fetchpriority="low">` : '<div class="placeholder">Şəkil yoxdur</div>'}<small>${esc(product.category)}</small><h2>${esc(product.name)}</h2><footer><span class="price">${money(product.price)}</span><button data-add="${esc(product.id)}">Səbətə</button></footer></article>`).join("") || "<p>Məhsul hazırda yoxdur.</p>") + (shown.length > visible.length ? `<button id="loadMore" class="load-more">Daha çox məhsul göstər (${shown.length - visible.length})</button>` : "");
   document.querySelectorAll("[data-category]").forEach((button) => {
-    button.onclick = () => { category = button.dataset.category; render(); };
+    button.onclick = () => { category = button.dataset.category; visibleProducts = 12; render(); };
   });
   document.querySelectorAll("[data-add]").forEach((button) => {
     button.onclick = () => {
@@ -47,6 +49,8 @@ function render() {
       showToast("Məhsul səbətə əlavə edildi ✓");
     };
   });
+  const loadMore = $("loadMore");
+  if (loadMore) loadMore.onclick = () => { visibleProducts += 12; render(); };
 }
 function renderCart() {
   $("cartCount").textContent = cart.reduce((sum, item) => sum + item.quantity, 0);

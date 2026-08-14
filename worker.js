@@ -86,9 +86,16 @@ const whatsappPhone = (value) => {
   if (digits.startsWith("0")) return `994${digits.slice(1)}`;
   return digits.length <= 9 ? `994${digits}` : digits;
 };
-async function ensureNotifications(e) {
-  await e.DB.prepare("CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, kind TEXT NOT NULL DEFAULT 'info', title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', data_json TEXT, is_read INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run();
-  await e.DB.prepare("CREATE INDEX IF NOT EXISTS idx_notifications_owner ON notifications(owner_user_id, is_read, created_at DESC)").run();
+let notificationSchemaReady;
+function ensureNotifications(e) {
+  // DDL yalnız hər Worker isolate üçün bir dəfə işləyir; hər bildirişdə D1-i yükləmir.
+  if (!notificationSchemaReady) {
+    notificationSchemaReady = Promise.all([
+      e.DB.prepare("CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, kind TEXT NOT NULL DEFAULT 'info', title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', data_json TEXT, is_read INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run(),
+      e.DB.prepare("CREATE INDEX IF NOT EXISTS idx_notifications_owner ON notifications(owner_user_id, is_read, created_at DESC)").run(),
+    ]);
+  }
+  return notificationSchemaReady;
 }
 async function notification(e, ownerId, kind, title, body, data = null) {
   await ensureNotifications(e);

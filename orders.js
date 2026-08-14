@@ -41,6 +41,21 @@ state.ui = {
 let pendingImage = "",
   editing = null,
   lastDeleted = null;
+let xlsxLoader;
+async function loadXlsx() {
+  if (window.XLSX) return window.XLSX;
+  if (!xlsxLoader) {
+    xlsxLoader = new Promise((resolve, reject) => {
+      const script = document.createElement("script");
+      script.src = "https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js";
+      script.async = true;
+      script.onload = () => window.XLSX ? resolve(window.XLSX) : reject(new Error("Excel modulu yüklənmədi."));
+      script.onerror = () => reject(new Error("Excel modulu yüklənmədi."));
+      document.head.appendChild(script);
+    });
+  }
+  return xlsxLoader;
+}
 const isCustomerPage =
   location.pathname.endsWith("customer-orders.html") ||
   location.pathname.endsWith("customer-orders");
@@ -664,8 +679,8 @@ function tariffSettings() {
     render();
   };
 }
-function exportExcel() {
-  if (!window.XLSX) return alert("Excel modulu yüklənmədi.");
+async function exportExcel() {
+  try { await loadXlsx(); } catch { return alert("Excel modulu yüklənmədi. İnterneti yoxlayın."); }
   const wb = XLSX.utils.book_new();
   state.orders.forEach((o, n) => {
     const rows = [
@@ -753,9 +768,9 @@ function importSold(value) {
     normalizeHeader(value),
   );
 }
-function importItems(file) {
-  if (!window.XLSX) return alert("Excel modulu yüklənmədi.");
+async function importItems(file) {
   if (!file) return;
+  try { await loadXlsx(); } catch { return alert("Excel modulu yüklənmədi. İnterneti yoxlayın."); }
   const reader = new FileReader();
   reader.onload = (event) => {
     try {
@@ -825,8 +840,8 @@ function importItems(file) {
   };
   reader.readAsArrayBuffer(file);
 }
-function downloadImportTemplate() {
-  if (!window.XLSX) return alert("Excel modulu yüklənmədi.");
+async function downloadImportTemplate() {
+  try { await loadXlsx(); } catch { return alert("Excel modulu yüklənmədi. İnterneti yoxlayın."); }
   const rows = [
     [
       "Məhsul",
