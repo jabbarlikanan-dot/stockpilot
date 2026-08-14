@@ -33,13 +33,17 @@ function render() {
   $("categories").innerHTML = categories.map((name) => `<button class="${name === category ? "active" : ""}" data-category="${esc(name)}">${esc(name)}</button>`).join("");
   const shown = products.filter((product) => category === "Hamısı" || product.category === category);
   const visible = shown.slice(0, visibleProducts);
-  $("products").innerHTML = (visible.map((product) => `<article class="product">${product.image ? `<img src="${product.image}" alt="${esc(product.name)}" loading="lazy" decoding="async" fetchpriority="low">` : '<div class="placeholder">Şəkil yoxdur</div>'}<small>${esc(product.category)}</small><h2>${esc(product.name)}</h2><footer><span class="price">${money(product.price)}</span><button data-add="${esc(product.id)}">Səbətə</button></footer></article>`).join("") || "<p>Məhsul hazırda yoxdur.</p>") + (shown.length > visible.length ? `<button id="loadMore" class="load-more">Daha çox məhsul göstər (${shown.length - visible.length})</button>` : "");
+  $("products").innerHTML = (visible.map((product) => {
+    const available = Number(product.quantity) > 0;
+    return `<article class="product ${available ? "" : "out-of-stock"}">${product.image ? `<img src="${product.image}" alt="${esc(product.name)}" loading="lazy" decoding="async" fetchpriority="low">` : '<div class="placeholder">Şəkil yoxdur</div>'}<small>${esc(product.category)}</small><h2>${esc(product.name)}</h2><footer><span class="price">${money(product.price)}</span><button data-add="${esc(product.id)}" ${available ? "" : "disabled"}>${available ? "Səbətə" : "Stokda yoxdur"}</button></footer></article>`;
+  }).join("") || "<p>Məhsul hələ əlavə edilməyib.</p>") + (shown.length > visible.length ? `<button id="loadMore" class="load-more">Daha çox məhsul göstər (${shown.length - visible.length})</button>` : "");
   document.querySelectorAll("[data-category]").forEach((button) => {
     button.onclick = () => { category = button.dataset.category; visibleProducts = 12; render(); };
   });
   document.querySelectorAll("[data-add]").forEach((button) => {
     button.onclick = () => {
       const product = products.find((item) => item.id === button.dataset.add);
+      if (!product || Number(product.quantity) < 1) return showToast("Bu məhsul hazırda stokda yoxdur.");
       const line = cart.find((item) => item.id === product.id);
       if (line) {
         if (line.quantity >= line.maxQuantity) return showToast("Stokda daha çox məhsul yoxdur.");

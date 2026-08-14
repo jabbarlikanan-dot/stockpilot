@@ -270,6 +270,8 @@ button {
 .customer-orders p { margin: 3px 0 7px; color: var(--muted); }
 .customer-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px 16px; padding: 12px; border: 1px solid var(--line); border-radius: 10px; background: rgba(255,255,255,.012); }
 .customer-card.done { opacity: .78; }
+.customer-card.highlight { border-color: var(--lime); box-shadow: 0 0 0 3px rgba(198,217,44,.16); animation: order-highlight 1.6s ease-out 1; }
+@keyframes order-highlight { 0% { transform: translateY(-3px); background: rgba(198,217,44,.12); } 100% { transform: translateY(0); background: rgba(255,255,255,.012); } }
 .customer-card-main { min-width: 0; display: grid; gap: 4px; }
 .customer-card-main span, .customer-card-main small { color: var(--muted); }
 .customer-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; }

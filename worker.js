@@ -228,7 +228,8 @@ export default {
       const owner = await e.DB.prepare("SELECT * FROM users WHERE username=?").bind(storeMatch[1]).first();
       if (!owner) return fail("Mağaza tapılmadı.", 404);
       const state = await readState(e, owner.id);
-      return json({ shop: { username: owner.username, name: `${owner.first_name} ${owner.last_name}` }, products: productList(state).filter((x) => !x.sold && x.quantity > 0) });
+      // Kataloq tam görünür. Stoku 0 olan məhsul sifariş edilmir, amma mağazadan itmir.
+      return json({ shop: { username: owner.username, name: `${owner.first_name} ${owner.last_name}` }, products: productList(state) });
     }
     const storeOrderMatch = p.match(/^\/api\/store\/([\w.-]{3,30})\/orders$/);
     if (storeOrderMatch && r.method === "POST") {

@@ -148,7 +148,8 @@ function customerOrderCard(order, compact = false) {
   const statusOptions = Object.entries(customerStatus)
     .map(([key, label]) => `<option value="${key}" ${order.status === key ? "selected" : ""}>${label}</option>`)
     .join("");
-  return `<article class="customer-card ${terminalCustomerStatus.has(order.status) ? "done" : ""}">
+  const selectedFromNotification = location.hash === `#order-${order.id}`;
+  return `<article id="order-${esc(order.id)}" class="customer-card ${terminalCustomerStatus.has(order.status) ? "done" : ""} ${selectedFromNotification ? "highlight" : ""}">
     <div class="customer-card-main"><b>${esc(order.customer?.name)}</b><span>${esc(order.customer?.phone)} · ${money(order.total)} ₼</span>
     <small>${(order.cart || []).map((item) => `${esc(item.name)} × ${item.quantity}`).join(", ")}${order.customer?.note ? ` — ${esc(order.customer.note)}` : ""}</small>
     <small>${dateTime(order.createdAt)}${order.customer?.delivery ? ` · ${esc(order.customer.delivery === "metro" ? "Metro təhvil" : "Ünvana çatdırılma")}` : ""}${order.customer?.preferredAt ? ` · İstədiyi vaxt: ${dateTime(order.customer.preferredAt)}` : ""}</small></div>
@@ -336,6 +337,33 @@ function newOrder() {
   save();
   render();
 }
+function duplicateOrder() {
+  const source = active();
+  if (!source) return newOrder();
+  const copy = {
+    ...JSON.parse(JSON.stringify(source)),
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+    name: `${source.name || "Sifariş"} — kopya`,
+    createdAt: new Date().toISOString(),
+    archived: false,
+    // Yeni cədvəl satış tarixçəsini yox, yalnız məhsulları kopyalayır.
+    items: (source.items || []).map((item) => {
+      const result = { ...item };
+      const count = acquiredQty(item);
+      result.qty = count;
+      result.acquiredQty = count;
+      result.sold = false;
+      result.soldQty = 0;
+      result.saleEvents = [];
+      delete result.soldAt;
+      return result;
+    }),
+  };
+  state.orders.push(copy);
+  state.active = copy.id;
+  save();
+  render();
+}
 function sortedOrders() {
   return state.orders
     .filter((o) => Boolean(o.archived) === Boolean(state.ui.showArchived))
@@ -484,6 +512,9 @@ function renderCustomerPanel() {
   const filterButton = (value, label, count) =>
     `<button class="${state.ui.customerView === value ? "primary" : "secondary"}" data-customer-filter="${value}">${label} (${count})</button>`;
   $("content").innerHTML = `<section class="box customer-orders customer-panel"><div class="customer-heading"><div><h2>Müştəri sifarişləri</h2><p>${state.customerOrders.length} ümumi sifariş · səhifə açıq olduqda avtomatik yenilənir.</p></div><div class="customer-actions"><button id="refreshCustomerOrders" class="secondary">Yenilə</button><button id="customerHistory" class="secondary">Tarixçə</button></div></div><div class="customer-filters">${filterButton("all", "Hamısı", state.customerOrders.length)}${filterButton("new", "Yeni", counts.new)}${filterButton("confirmed", "Təsdiqləndi", counts.confirmed)}${filterButton("preparing", "Hazırlanır", counts.preparing)}${filterButton("courier", "Kuryerdə", counts.courier)}${filterButton("delivered", "Tamamlandı", counts.delivered)}${filterButton("cancelled", "Ləğv edildi", counts.cancelled)}</div>${shown.length ? shown.map((order) => customerOrderCard(order)).join("") : '<p class="hint">Bu filtr üçün sifariş yoxdur.</p>'}</section>`;
+  if (location.hash.startsWith("#order-")) {
+    requestAnimationFrame(() => document.getElementById(location.hash.slice(1))?.scrollIntoView({ behavior: "smooth", block: "center" }));
+  }
   if ($("customerHistory")) $("customerHistory").onclick = customerHistory;
   if ($("refreshCustomerOrders")) $("refreshCustomerOrders").onclick = async () => {
     try {
@@ -537,7 +568,7 @@ function render() {
     todayValue = todaySold.reduce((s, sale) => s + soldSummary(sale.item, sale.qty).sales, 0) + todayCustomerSales.reduce((sum, sale) => sum + (Number(sale.sales) || 0), 0),
     rows = visibleItems(o);
   $("content").innerHTML =
-    `<section class="box orderbar"><div class="field name"><label>Sifarişin adı</label><input id="orderName" value="${esc(o.name)}"></div><div class="field"><label>Yaradılma tarixi</label><input readonly value="${dateTime(o.createdAt)}"></div><div class="field"><label>Büdcə (₼)</label><input id="budget" type="number" min="0" value="${o.budget || 0}"></div><div class="field"><label>Qısa qeyd</label><input id="orderNote" maxlength="80" value="${esc(o.note || "")}" placeholder="Məsələn: Avqust malları"></div><button id="archiveOrder" class="secondary">${o.archived ? "Arxivdən çıxar" : "Arxivlə"}</button><button id="deleteOrder" class="danger">Sifarişi sil</button></section><section class="box tools"><input id="search" value="${esc(state.ui.search)}" placeholder="Məhsul adında axtarış…"><select id="statusFilter"><option value="all">Bütün məhsullar</option><option value="sold" ${state.ui.status === "sold" ? "selected" : ""}>Satılanlar</option><option value="unsold" ${state.ui.status === "unsold" ? "selected" : ""}>Satılmayanlar</option></select><select id="orderSort"><option value="newest">Yeni sifarişlər əvvəl</option><option value="oldest" ${state.ui.orderSort === "oldest" ? "selected" : ""}>Köhnə sifarişlər əvvəl</option></select><small>Son yadda saxlanma: ${dateTime(state.ui.lastSavedAt)}</small></section><section class="workspace"><aside class="box form"><h2>${e ? "Məhsulu redaktə et" : "Məhsul əlavə et"}</h2><div class="grid"><div class="field wide"><label>Məhsulun adı</label><input id="name" value="${e ? esc(e.name) : ""}" placeholder="Məsələn: Kreatin"></div><div class="field"><label>Kateqoriya</label><select id="category">${["Əlavələr", "Geyim", "Elektronika", "Kosmetika", "Ev və digər"].map((v) => `<option ${e?.category === v ? "selected" : ""}>${v}</option>`).join("")}</select></div><div class="field"><label>Ölkə</label><select id="productCountry">${countryOptions(e ? e.country : "america")}</select></div><div class="field"><label>Say</label><div class="qty-control"><button type="button" id="qtyMinus">−</button><input id="qty" type="number" min="1" value="${e ? e.qty : 1}"><button type="button" id="qtyPlus">+</button></div></div><div class="field"><label>Minimum stok</label><input id="minStock" type="number" min="0" value="${e?.minStock ?? 3}"></div><div class="field"><label>Alış qiyməti</label><input id="price" type="number" min="0" step=".01" value="${e ? e.price : 0}"></div><div class="field"><label>Satış qiyməti (₼)</label><input id="sale" type="number" min="0" step=".01" value="${e ? e.sale : 0}"></div><div class="field wide"><label>Çəki (qram, ümumi)</label><input id="weight" type="number" min="0" value="${e ? e.weight : 0}"></div><div class="field wide"><label>Məhsul şəkli</label><input id="image" class="file" type="file" accept="image/png,image/jpeg,image/webp">${e && pendingImage ? '<button id="deleteImage" class="remove" style="margin-top:8px">Şəkli sil</button>' : ""}</div></div><p class="hint">Seçilən ölkənin tarifi və məzənnəsi avtomatik tətbiq olunur.</p><button id="saveItem" class="primary save">${e ? "Dəyişiklikləri yadda saxla" : "Listə əlavə et"}</button>${e ? '<button id="cancelEdit" class="secondary save">Ləğv et</button>' : ""}</aside><section class="box tablebox"><div class="scroll"><table class="items"><thead><tr><th>Şəkil</th><th>Məhsul / kateqoriya</th><th>Ölkə</th><th>Say</th><th>Alış</th><th>Karqo</th><th>Ümumi alış</th><th>Satış</th><th>Qazanc</th><th>Faiz</th><th>Status</th><th>Əməliyyat</th></tr></thead><tbody>${
+    `<section class="box orderbar"><div class="field name"><label>Sifarişin adı</label><input id="orderName" value="${esc(o.name)}"></div><div class="field"><label>Yaradılma tarixi</label><input readonly value="${dateTime(o.createdAt)}"></div><div class="field"><label>Büdcə (₼)</label><input id="budget" type="number" min="0" value="${o.budget || 0}"></div><div class="field"><label>Qısa qeyd</label><input id="orderNote" maxlength="80" value="${esc(o.note || "")}" placeholder="Məsələn: Avqust malları"></div><button id="duplicateOrder" class="secondary" title="Bu cədvəlin kopyasını yarat">Dublikat et</button><button id="archiveOrder" class="secondary">${o.archived ? "Arxivdən çıxar" : "Arxivlə"}</button><button id="deleteOrder" class="danger">Sifarişi sil</button></section><section class="box tools"><input id="search" value="${esc(state.ui.search)}" placeholder="Məhsul adında axtarış…"><select id="statusFilter"><option value="all">Bütün məhsullar</option><option value="sold" ${state.ui.status === "sold" ? "selected" : ""}>Satılanlar</option><option value="unsold" ${state.ui.status === "unsold" ? "selected" : ""}>Satılmayanlar</option></select><select id="orderSort"><option value="newest">Yeni sifarişlər əvvəl</option><option value="oldest" ${state.ui.orderSort === "oldest" ? "selected" : ""}>Köhnə sifarişlər əvvəl</option></select><small>Son yadda saxlanma: ${dateTime(state.ui.lastSavedAt)}</small></section><section class="workspace"><aside class="box form"><h2>${e ? "Məhsulu redaktə et" : "Məhsul əlavə et"}</h2><div class="grid"><div class="field wide"><label>Məhsulun adı</label><input id="name" value="${e ? esc(e.name) : ""}" placeholder="Məsələn: Kreatin"></div><div class="field"><label>Kateqoriya</label><select id="category">${["Əlavələr", "Geyim", "Elektronika", "Kosmetika", "Ev və digər"].map((v) => `<option ${e?.category === v ? "selected" : ""}>${v}</option>`).join("")}</select></div><div class="field"><label>Ölkə</label><select id="productCountry">${countryOptions(e ? e.country : "america")}</select></div><div class="field"><label>Say</label><div class="qty-control"><button type="button" id="qtyMinus">−</button><input id="qty" type="number" min="1" value="${e ? e.qty : 1}"><button type="button" id="qtyPlus">+</button></div></div><div class="field"><label>Minimum stok</label><input id="minStock" type="number" min="0" value="${e?.minStock ?? 3}"></div><div class="field"><label>Alış qiyməti</label><input id="price" type="number" min="0" step=".01" value="${e ? e.price : 0}"></div><div class="field"><label>Satış qiyməti (₼)</label><input id="sale" type="number" min="0" step=".01" value="${e ? e.sale : 0}"></div><div class="field wide"><label>Çəki (qram, ümumi)</label><input id="weight" type="number" min="0" value="${e ? e.weight : 0}"></div><div class="field wide"><label>Məhsul şəkli</label><input id="image" class="file" type="file" accept="image/png,image/jpeg,image/webp">${e && pendingImage ? '<button id="deleteImage" class="remove" style="margin-top:8px">Şəkli sil</button>' : ""}</div></div><p class="hint">Seçilən ölkənin tarifi və məzənnəsi avtomatik tətbiq olunur.</p><button id="saveItem" class="primary save">${e ? "Dəyişiklikləri yadda saxla" : "Listə əlavə et"}</button>${e ? '<button id="cancelEdit" class="secondary save">Ləğv et</button>' : ""}</aside><section class="box tablebox"><div class="scroll"><table class="items"><thead><tr><th>Şəkil</th><th>Məhsul / kateqoriya</th><th>Ölkə</th><th>Say</th><th>Alış</th><th>Karqo</th><th>Ümumi alış</th><th>Satış</th><th>Qazanc</th><th>Faiz</th><th>Status</th><th>Əməliyyat</th></tr></thead><tbody>${
       rows.length
         ? rows
             .map(({ item: i, index: n }) => {
@@ -601,6 +632,7 @@ function bind(o, e) {
     save();
     render();
   };
+  $("duplicateOrder").onclick = duplicateOrder;
   $("qtyMinus").onclick = () =>
     ($("qty").value = Math.max(1, (+$("qty").value || 1) - 1));
   $("qtyPlus").onclick = () => ($("qty").value = (+$("qty").value || 0) + 1);
