@@ -150,12 +150,10 @@ export default {
     if (p.startsWith("/api/images/")) {
       if (!e.IMAGES) return new Response("Not found", { status: 404 });
       const o = await e.IMAGES.get(decodeURIComponent(p.slice(12)));
-      // Şəkil açarları unikal (UUID) olduğu üçün məzmun dəyişmir — uzun müddət keşlənə bilər, bu da təkrar yükləmələri sürətləndirir.
       return o
         ? new Response(o.body, {
             headers: {
               "content-type": o.httpMetadata?.contentType || "image/jpeg",
-              "cache-control": "public, max-age=31536000, immutable",
             },
           })
         : new Response("Not found", { status: 404 });
@@ -307,7 +305,7 @@ export default {
         )
           .bind(user.id)
           .first();
-        return json({ state: row ? JSON.parse(row.state_json) : { orders: [] } });
+        return json({ state: JSON.parse(row.state_json) });
       }
       if (r.method === "PUT") {
         const { state } = await r.json();
@@ -390,7 +388,6 @@ export default {
         if (!order.customer.name || !order.customer.phone)
           return fail("Müştərinin adı və telefonu tələb olunur.");
       }
-      let stateWrite = Promise.resolve();
       if (status === 'delivered' && row.status !== 'delivered') {
         const state = await readState(e, user.id);
         state.customerSales = Array.isArray(state.customerSales) ? state.customerSales : [];
@@ -411,16 +408,11 @@ export default {
             }
           }
         }
-        stateWrite = e.DB.prepare("UPDATE user_state SET state_json=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?").bind(JSON.stringify(state), user.id).run();
+        await e.DB.prepare("UPDATE user_state SET state_json=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?").bind(JSON.stringify(state), user.id).run();
       }
-      // Bir-birindən asılı olmayan yazılar və xarici WhatsApp çağırışı paralel işə salınır — cavab vaxtını azaldır.
-      const statusChanged = status !== row.status;
-      const [, messageSent] = await Promise.all([
-        stateWrite,
-        statusChanged ? sendWhatsAppStatus(e, order, status).catch(() => false) : Promise.resolve(false),
-        e.DB.prepare("UPDATE customer_orders SET order_json=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND owner_user_id=?").bind(JSON.stringify(order), status, customerMatch[1], user.id).run(),
-        statusChanged ? notification(e, user.id, "order-status", `Sifariş statusu: ${whatsappStatuses[status] || status}`, `${order.customer?.name || "Müştəri"} · ${order.total?.toFixed?.(2) || order.total || 0} ₼`, { orderId: customerMatch[1], status }) : Promise.resolve(),
-      ]);
+      await e.DB.prepare("UPDATE customer_orders SET order_json=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND owner_user_id=?").bind(JSON.stringify(order), status, customerMatch[1], user.id).run();
+      const messageSent = status !== row.status ? await sendWhatsAppStatus(e, order, status).catch(() => false) : false;
+      if (status !== row.status) await notification(e, user.id, "order-status", `Sifariş statusu: ${whatsappStatuses[status] || status}`, `${order.customer?.name || "Müştəri"} · ${order.total?.toFixed?.(2) || order.total || 0} ₼`, { orderId: customerMatch[1], status });
       return json({ ok: true, messageSent, whatsappUrl: whatsappUrl(order, status), order: { ...order, status } });
     }
     return e.ASSETS.fetch(r);
