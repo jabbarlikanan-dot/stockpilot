@@ -35,12 +35,9 @@ function paintUser() {
     );
 }
 function soldValue(item) {
-  if (item.customerSale) return Number(item.sales) || 0;
   return (+item.sale || 0) * (+item.qty || 0);
 }
 function profitValue(item) {
-  if (item.customerSale)
-    return (Number(item.sales) || 0) - (Number(item.purchase) || 0);
   const rate = item.country === "spain" ? 1.96 : 1.7;
   return soldValue(item) - (+item.price || 0) * (+item.qty || 0) * rate;
 }
@@ -48,21 +45,8 @@ function drawStats(state) {
   const now = new Date(),
     weekStart = startOfWeek(now),
     items = (state.orders || [])
-      .flatMap((order) => (order.items || []).flatMap((item) => {
-        const acquired = Math.max(0, Number(item.acquiredQty ?? item.qty) || 0);
-        const soldQty = Math.min(acquired, Math.max(0, Number.isFinite(Number(item.soldQty)) ? Number(item.soldQty) : item.sold ? acquired : 0));
-        const events = Array.isArray(item.saleEvents) ? item.saleEvents : item.soldAt && soldQty ? [{ qty: soldQty, soldAt: item.soldAt }] : [];
-        return events.map((event) => ({ ...item, qty: Number(event.qty) || 0, soldAt: event.soldAt, sold: true }));
-      }))
-      .concat(
-        (state.customerSales || []).map((sale) => ({
-          ...sale,
-          customerSale: true,
-          sold: true,
-          name: sale.name || "Müştəri sifarişi",
-          qty: sale.quantity,
-        })),
-      );
+      .flatMap((order) => order.items || [])
+      .filter((item) => item.sold);
   const inPeriod = (test) =>
     items.filter((item) => item.soldAt && test(new Date(item.soldAt)));
   const today = inPeriod((date) => sameDay(date, now)),
@@ -95,17 +79,6 @@ function drawStats(state) {
   const detail = document.getElementById("detail");
   if (detail)
     detail.innerHTML = `<p class="notice">Bu profilə aid ümumi nəticə: <b>${format(sum(items))}</b> satış, <b>${format(sum(items, profitValue))}</b> qazanc.</p>`;
-  const grouped = items.reduce((result, item) => {
-    const key = item.name || "Adsız məhsul";
-    result[key] = (result[key] || 0) + profitValue(item);
-    return result;
-  }, {});
-  const top = Object.entries(grouped)
-    .sort((a, b) => b[1] - a[1])
-    .slice(0, 3);
-  const topProducts = document.getElementById("topProducts");
-  if (topProducts)
-    topProducts.innerHTML = `<h2>Ən çox qazandıran 3 məhsul</h2>${top.length ? `<ol>${top.map(([name, profit]) => `<li><span>${name}</span><b>${format(profit)}</b></li>`).join("")}</ol>` : '<p class="notice">Satılmış məhsul olduqda burada görünəcək.</p>'}`;
 }
 async function boot() {
   let state;

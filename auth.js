@@ -80,10 +80,8 @@ async function register(event) {
       body: data,
     });
     const result = await readResponse(response);
-    if (response.ok && result.token) {
-      localStorage.stockpilotToken = result.token;
-      return (location.href = "dashboard.html");
-    }
+    if (response.ok && result.token)
+      return (location.href = "index.html?registered=1");
     return message(
       form,
       result.error || "Qeydiyyat baş tutmadı. Məlumatları yoxlayın.",
@@ -104,4 +102,12 @@ document.addEventListener("DOMContentLoaded", () => {
   document
     .querySelectorAll("#registerForm")
     .forEach((form) => (form.onsubmit = register));
+  const params = new URLSearchParams(location.search);
+  if (params.get("registered") === "1") {
+    document.querySelectorAll("#loginForm .msg").forEach((item) => {
+      item.textContent =
+        "Qeydiyyat database-ə yazıldı. Username və şifrənlə daxil ol.";
+      item.style.color = "#c6d92c";
+    });
+  }
 });
