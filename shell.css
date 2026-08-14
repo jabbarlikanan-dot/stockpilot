@@ -178,3 +178,26 @@
   .app-shell { transition: grid-template-columns 180ms ease; }
   .sidebar-brand, .nav-label, .nav-caption, .sidebar-foot { transition: opacity 140ms ease; }
 }
+
+/* UX utilities */
+:focus-visible { outline: 3px solid color-mix(in srgb, var(--lime, #c6d92c) 60%, transparent); outline-offset: 2px; }
+button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
+button:disabled, [aria-disabled="true"] { cursor: not-allowed !important; opacity: .58; transform: none !important; }
+.is-offline .app-main::before { content: "Offline"; position: fixed; z-index: 100; top: 8px; left: 50%; transform: translateX(-50%); padding: 5px 10px; border: 1px solid #7b493d; border-radius: 999px; background: #2b1814; color: #ffb09d; font-size: 11px; font-weight: 900; box-shadow: 0 8px 24px #0007; }
+.sp-toast-host { position: fixed; z-index: 200; right: 16px; bottom: 18px; display: grid; gap: 8px; width: min(360px, calc(100vw - 32px)); pointer-events: none; }
+.sp-toast { opacity: 0; transform: translateY(10px); padding: 12px 14px; border: 1px solid #425036; border-radius: 12px; background: #151c12; color: #f4f7ee; box-shadow: 0 18px 48px #0009; font-size: 13px; font-weight: 750; transition: 180ms ease; }
+.sp-toast.show { opacity: 1; transform: none; }
+.sp-toast-success { border-color: #63772f; }
+.sp-toast-error { border-color: #82483d; background: #241512; }
+.sp-dialog-backdrop { position: fixed; inset: 0; z-index: 210; display: grid; place-items: center; padding: 16px; background: #000a; backdrop-filter: blur(8px); }
+.sp-dialog { width: min(440px, 100%); padding: 18px; border: 1px solid var(--line, #303a29); border-radius: 16px; background: #121710; box-shadow: 0 30px 90px #000c; }
+.sp-dialog-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.sp-dialog-head h2 { margin: 0; font-size: 19px; }
+.sp-dialog-close { width: 36px; height: 36px; padding: 0; border: 1px solid var(--line, #303a29); border-radius: 10px; background: #1a2116; color: #dce5d5; font-size: 23px; }
+.sp-dialog-field { display: grid; gap: 8px; margin-top: 16px; color: var(--muted, #9ca895); font-size: 13px; font-weight: 700; }
+.sp-dialog-field input { width: 100%; min-height: 46px; padding: 11px 12px; border: 1px solid #3a4533; border-radius: 10px; background: #171e14; color: #f3f6ed; outline: none; }
+.sp-dialog-field input:focus { border-color: var(--lime, #c6d92c); box-shadow: 0 0 0 3px #c6d92c1d; }
+.sp-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+.sp-dialog-actions button { min-height: 40px; padding: 9px 13px; border: 1px solid var(--line, #303a29); border-radius: 10px; background: #1b2317; color: #eef3e8; font-weight: 800; }
+.sp-dialog-actions .sp-dialog-confirm { border-color: var(--lime, #c6d92c); background: var(--lime, #c6d92c); color: #11150c; }
+@media (max-width: 760px) { .sp-toast-host { bottom: calc(78px + env(safe-area-inset-bottom)); } .sp-dialog { border-radius: 14px; } }

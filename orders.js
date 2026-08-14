@@ -25,6 +25,7 @@ let state = window.__stockState || {
   countries: defaults,
 };
 state.countries = { ...defaults, ...(state.countries || {}) };
+const notify = (message, type = "info") => window.StockPilotUI?.toast(String(message || ""), type, type === "error" ? 4200 : 2800);
 state.ui = {
   search: "",
   status: "all",
@@ -296,7 +297,7 @@ function editCustomerOrder(id) {
       headers: { "content-type": "application/json", Authorization: `Bearer ${localStorage.stockpilotToken}` },
       body: JSON.stringify({ status: order.status, customer: { name: $("customerName").value, phone: $("customerPhone").value, note: $("customerNote").value, delivery: $("customerDelivery").value, preferredAt: $("customerPreferredAt").value, metro: $("customerMetro").value, address: $("customerAddress").value, payment: $("customerPayment").value } }),
     });
-    if (!response.ok) return alert("Dəyişiklik yadda saxlanmadı.");
+    if (!response.ok) return notify("Dəyişiklik yadda saxlanmadı.");
     await refreshCustomerOrders();
     hideModal();
     render();
@@ -305,7 +306,7 @@ function editCustomerOrder(id) {
 function bindCustomerOrderActions() {
   document.querySelectorAll("[data-customer-status]").forEach((select) => (select.onchange = async () => {
     const response = await fetch(`/api/customer-orders/${select.dataset.customerStatus}`, { method: "PUT", headers: { "content-type": "application/json", Authorization: `Bearer ${localStorage.stockpilotToken}` }, body: JSON.stringify({ status: select.value }) });
-    if (!response.ok) return alert("Status yadda saxlanmadı.");
+    if (!response.ok) return notify("Status yadda saxlanmadı.");
     const result = await response.json().catch(() => ({}));
     if (result.whatsappUrl && confirm("Müştəriyə WhatsApp status mesajı açılsın?")) window.open(result.whatsappUrl, "_blank", "noopener");
     await refreshCustomerOrders();
@@ -316,7 +317,7 @@ function bindCustomerOrderActions() {
   document.querySelectorAll("[data-customer-delete]").forEach((button) => (button.onclick = async () => {
     if (!confirm("Müştəri sifarişi silinsin?")) return;
     const response = await fetch(`/api/customer-orders/${button.dataset.customerDelete}`, { method: "DELETE", headers: { Authorization: `Bearer ${localStorage.stockpilotToken}` } });
-    if (!response.ok) return alert("Sifariş silinmədi.");
+    if (!response.ok) return notify("Sifariş silinmədi.");
     await refreshCustomerOrders();
     hideModal();
     render();
@@ -521,7 +522,7 @@ function renderCustomerPanel() {
       await refreshCustomerOrders();
       render();
     } catch {
-      alert("Sifarişlər yenilənmədi. Giriş sessiyasını yeniləyin.");
+      notify("Sifarişlər yenilənmədi. Giriş sessiyasını yeniləyin.");
     }
   };
   document.querySelectorAll("[data-customer-filter]").forEach((button) => {
@@ -676,7 +677,7 @@ function bind(o, e) {
       sold: e ? Boolean(e.sold) : false,
       soldAt: e?.soldAt || null,
     };
-    if (!i.name || !i.qty) return alert("Məhsulun adını və sayını yazın.");
+    if (!i.name || !i.qty) return notify("Məhsulun adını və sayını yazın.");
     if (e) o.items[editing] = i;
     else o.items.push(i);
     editing = null;
@@ -715,14 +716,18 @@ function bind(o, e) {
   );
   document.querySelectorAll("[data-sold]").forEach(
     (b) =>
-      (b.onclick = () => {
+      (b.onclick = async () => {
         const i = o.items[+b.dataset.sold];
-        const count = Number(prompt(`Neçə ədəd satıldı? Stokda ${remainingQty(i)} ədəd var.`, "1"));
-        if (!Number.isFinite(count) || count <= 0) return;
-        if (count > remainingQty(i)) return alert(`Stokda yalnız ${remainingQty(i)} ədəd qalıb.`);
-        addSale(i, count);
+        const max = remainingQty(i);
+        const count = window.StockPilotUI?.promptNumber
+          ? await window.StockPilotUI.promptNumber({ title: "Satış əlavə et", label: `Stokda ${max} ədəd var. Neçə ədəd satıldı?`, min: 1, max, value: 1, confirmText: "Satışı əlavə et" })
+          : Number(prompt(`Neçə ədəd satıldı? Stokda ${max} ədəd var.`, "1"));
+        if (count == null || !Number.isFinite(Number(count)) || Number(count) <= 0) return;
+        if (Number(count) > max) return notify(`Stokda yalnız ${max} ədəd qalıb.`, "error");
+        addSale(i, Number(count));
         save();
         render();
+        notify("Satış əlavə edildi", "success");
       }),
   );
   document.querySelectorAll("[data-undo-sale]").forEach(
@@ -786,7 +791,7 @@ function tariffSettings() {
   };
 }
 async function exportExcel() {
-  try { await loadXlsx(); } catch { return alert("Excel modulu yüklənmədi. İnterneti yoxlayın."); }
+  try { await loadXlsx(); } catch { return notify("Excel modulu yüklənmədi. İnterneti yoxlayın."); }
   const wb = XLSX.utils.book_new();
   state.orders.forEach((o, n) => {
     const rows = [
@@ -876,7 +881,7 @@ function importSold(value) {
 }
 async function importItems(file) {
   if (!file) return;
-  try { await loadXlsx(); } catch { return alert("Excel modulu yüklənmədi. İnterneti yoxlayın."); }
+  try { await loadXlsx(); } catch { return notify("Excel modulu yüklənmədi. İnterneti yoxlayın."); }
   const reader = new FileReader();
   reader.onload = (event) => {
     try {
@@ -932,22 +937,22 @@ async function importItems(file) {
         })
         .filter((item) => item.name && item.qty > 0);
       if (!items.length) {
-        return alert(
+        return notify(
           "Oxunan məhsul tapılmadı. Başlıqlar: Məhsul, Say, Alış qiyməti, Satış qiyməti, Çəki, Ölkə, Kateqoriya, Status.",
         );
       }
       o.items.push(...items);
       save();
       render();
-      alert(`${items.length} məhsul aktiv sifarişə əlavə edildi.`);
+      notify(`${items.length} məhsul aktiv sifarişə əlavə edildi.`);
     } catch (error) {
-      alert("Excel faylı oxunmadı. Faylın formatını yoxlayın.");
+      notify("Excel faylı oxunmadı. Faylın formatını yoxlayın.");
     }
   };
   reader.readAsArrayBuffer(file);
 }
 async function downloadImportTemplate() {
-  try { await loadXlsx(); } catch { return alert("Excel modulu yüklənmədi. İnterneti yoxlayın."); }
+  try { await loadXlsx(); } catch { return notify("Excel modulu yüklənmədi. İnterneti yoxlayın."); }
   const rows = [
     [
       "Məhsul",

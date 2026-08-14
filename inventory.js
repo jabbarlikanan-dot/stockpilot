@@ -2,18 +2,28 @@ const token = localStorage.stockpilotToken;
 if (!token) location.href = "index.html";
 const api = (path, options = {}) => fetch(path, { ...options, headers: { Authorization: `Bearer ${token}`, ...(options.headers || {}) } });
 const money = (n) => `${Number(n || 0).toLocaleString("az-AZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₼`;
+const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[m]));
 let state = { orders: [] };
 let user;
 const logout = () => { localStorage.removeItem("stockpilotToken"); location.href = "index.html"; };
+const toast = (message, type = "info") => window.StockPilotUI?.toast(message, type);
+
 function paintUser() {
-  document.getElementById("user").innerHTML = `${user.photo ? `<img class="avatar" src="${user.photo}">` : `<b class="avatar">${user.firstName[0]}</b>`}<span><b>${user.firstName} ${user.lastName}</b><br><small>@${user.username}</small></span>`;
-}
-function allItems() {
-  return state.orders.filter((order) => !order.archived).flatMap((order) => (order.items || []).map((item, index) => ({ order, item, index }))).filter(({ item }) => remaining(item) > 0);
+  const root = document.getElementById("user");
+  root.replaceChildren();
+  const avatar = user.photo ? Object.assign(document.createElement("img"), { className: "avatar", src: user.photo, alt: "" }) : Object.assign(document.createElement("b"), { className: "avatar", textContent: (user.firstName || "U")[0].toUpperCase() });
+  const copy = document.createElement("span");
+  const name = document.createElement("b"); name.textContent = `${user.firstName || ""} ${user.lastName || ""}`.trim();
+  const br = document.createElement("br");
+  const username = document.createElement("small"); username.textContent = `@${user.username || ""}`;
+  copy.append(name, br, username); root.append(avatar, copy);
 }
 function acquired(item) { return Math.max(0, Number(item.acquiredQty ?? item.qty) || 0); }
 function sold(item) { const value = Number(item.soldQty); return Math.min(acquired(item), Math.max(0, Number.isFinite(value) ? value : item.sold ? acquired(item) : 0)); }
-function remaining(item) { return Math.min(acquired(item) - sold(item), Math.max(0, Number(item.qty) || 0)); }
+function remaining(item) { return Math.min(Math.max(0, acquired(item) - sold(item)), Math.max(0, Number(item.qty) || 0)); }
+function allItems() {
+  return state.orders.filter((order) => !order.archived).flatMap((order) => (order.items || []).map((item, index) => ({ order, item, index }))).filter(({ item }) => remaining(item) > 0);
+}
 function addSale(item, quantity) {
   const count = Math.min(remaining(item), Math.max(0, Number(quantity) || 0));
   if (!count) return false;
@@ -27,7 +37,17 @@ function addSale(item, quantity) {
   return true;
 }
 async function save() {
-  await api("/api/state", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(state) });
+  const response = await api("/api/state", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ state }) });
+  if (!response.ok) throw new Error("Dəyişiklik serverdə yadda saxlanmadı.");
+}
+async function persistAndRender(successMessage = "Stok yeniləndi") {
+  try { await save(); render(); toast(successMessage, "success"); }
+  catch (error) { toast(error.message || "Yadda saxlama xətası", "error"); }
+}
+async function askSaleCount(item) {
+  if (window.StockPilotUI?.promptNumber) return window.StockPilotUI.promptNumber({ title: "Satış əlavə et", label: `Stokda ${remaining(item)} ədəd var. Neçə ədəd satıldı?`, min: 1, max: remaining(item), value: 1, confirmText: "Satışı əlavə et" });
+  const value = Number(prompt(`Neçə ədəd satıldı? Stokda ${remaining(item)} ədəd var.`, "1"));
+  return Number.isFinite(value) ? value : null;
 }
 function render() {
   const search = document.getElementById("search").value.toLowerCase().trim();
@@ -36,19 +56,29 @@ function render() {
   const low = entries.filter(({ item }) => remaining(item) <= Number(item.minStock || 0));
   const favourite = entries.filter(({ item }) => item.favorite);
   document.getElementById("inventoryStats").innerHTML = `<article class="card"><span>Aktiv stok</span><b>${entries.reduce((sum, { item }) => sum + remaining(item), 0)} ədəd</b></article><article class="card"><span>Az qalan məhsul</span><b class="danger-value">${low.length}</b></article><article class="card"><span>Favorilər</span><b>${favourite.length}</b></article><article class="card"><span>Stokun alış dəyəri</span><b>${money(entries.reduce((sum, { item }) => sum + remaining(item) * Number(item.price || 0), 0))}</b></article>`;
-  const shown = entries.filter(({ item, order }) => (!search || `${item.name} ${order.name}`.toLowerCase().includes(search)) && (!lowOnly || remaining(item) <= Number(item.minStock || 0)));
+  const shown = entries.filter(({ item, order }) => (!search || `${item.name || ""} ${order.name || ""}`.toLowerCase().includes(search)) && (!lowOnly || remaining(item) <= Number(item.minStock || 0)));
   document.getElementById("inventory").innerHTML = shown.length ? shown.map(({ order, item, index }) => {
     const isLow = remaining(item) <= Number(item.minStock || 0);
-    return `<article class="card stock-card ${isLow ? "is-low" : ""}"><div class="stock-photo">${item.image ? `<img src="${item.image}" alt="">` : "▦"}</div><div class="stock-copy"><small>${order.name} · ${item.category || "Digər"}</small><h3>${item.favorite ? "★ " : ""}${item.name}</h3><p>${isLow ? `⚠ Minimum hədd: ${item.minStock} ədəd` : `Minimum hədd: ${item.minStock || 0} ədəd`}</p></div><div class="stock-actions"><div class="qty-stepper"><button data-minus="${order.id}:${index}">−</button><b>${remaining(item)}</b><button data-plus="${order.id}:${index}">+</button></div><button class="secondary" data-sold="${order.id}:${index}">Satış əlavə et</button></div></article>`;
-  }).join("") : `<div class="card empty-state">Axtarışa uyğun stok məhsulu yoxdur.</div>`;
+    const image = item.img || item.image || "";
+    return `<article class="card stock-card ${isLow ? "is-low" : ""}"><div class="stock-photo">${image ? `<img src="${esc(image)}" alt="${esc(item.name || "Məhsul")}">` : "▦"}</div><div class="stock-copy"><small>${esc(order.name || "Sifariş")} · ${esc(item.category || "Digər")}</small><h3>${item.favorite ? "★ " : ""}${esc(item.name || "Adsız məhsul")}</h3><p>${isLow ? `⚠ Minimum hədd: ${Number(item.minStock || 0)} ədəd` : `Minimum hədd: ${Number(item.minStock || 0)} ədəd`}</p></div><div class="stock-actions"><div class="qty-stepper"><button data-minus="${esc(order.id)}:${index}" aria-label="Stoku azalt">−</button><b>${remaining(item)}</b><button data-plus="${esc(order.id)}:${index}" aria-label="Stoku artır">+</button></div><button class="secondary" data-sold="${esc(order.id)}:${index}">Satış əlavə et</button></div></article>`;
+  }).join("") : `<div class="card empty-state">${search || lowOnly ? "Filterə uyğun stok məhsulu yoxdur." : "Aktiv stokda məhsul yoxdur."}</div>`;
   document.querySelectorAll("[data-plus],[data-minus],[data-sold]").forEach((button) => {
     button.onclick = async () => {
-      const [orderId, index] = (button.dataset.plus || button.dataset.minus || button.dataset.sold).split(":");
-      const item = state.orders.find((order) => order.id === orderId).items[Number(index)];
-      if (button.dataset.plus) { item.qty = remaining(item) + 1; item.acquiredQty = acquired(item) + 1; }
-      if (button.dataset.minus) item.qty = Math.max(1, remaining(item) - 1);
-      if (button.dataset.sold) { const count = Number(prompt(`Neçə ədəd satıldı? Stokda ${remaining(item)} ədəd var.`, "1")); if (!Number.isFinite(count) || count <= 0) return; if (count > remaining(item)) return alert(`Stokda yalnız ${remaining(item)} ədəd qalıb.`); addSale(item, count); }
-      await save(); render();
+      const ref = button.dataset.plus || button.dataset.minus || button.dataset.sold;
+      const splitAt = ref.lastIndexOf(":");
+      const orderId = ref.slice(0, splitAt), index = Number(ref.slice(splitAt + 1));
+      const order = state.orders.find((entry) => entry.id === orderId);
+      const item = order?.items?.[index];
+      if (!item) return toast("Məhsul tapılmadı. Səhifəni yeniləyin.", "error");
+      if (button.dataset.plus) { item.qty = remaining(item) + 1; item.acquiredQty = acquired(item) + 1; return persistAndRender(); }
+      if (button.dataset.minus) {
+        if (remaining(item) <= 1) return toast("Son məhsulu azaltmaq əvəzinə satış kimi qeyd edin.", "info");
+        item.qty = remaining(item) - 1; return persistAndRender();
+      }
+      const count = await askSaleCount(item);
+      if (count == null) return;
+      if (!Number.isFinite(Number(count)) || Number(count) <= 0 || Number(count) > remaining(item)) return toast(`1–${remaining(item)} arası say daxil edin.`, "error");
+      addSale(item, Number(count)); return persistAndRender("Satış əlavə edildi");
     };
   });
 }
@@ -57,9 +87,10 @@ async function boot() {
   if (!me.ok || !saved.ok) return logout();
   user = (await me.json()).user;
   state = (await saved.json()).state || { orders: [] };
+  if (!Array.isArray(state.orders)) state.orders = [];
   paintUser(); render();
   document.getElementById("search").oninput = render;
   document.getElementById("onlyLow").onchange = render;
   document.getElementById("logout").onclick = logout;
 }
-boot().catch(logout);
+boot().catch(() => logout());

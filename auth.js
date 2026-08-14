@@ -43,6 +43,9 @@ async function login(event) {
   if (!/^\d{4}$/.test(body.password))
     return message(form, "Şifrə 4 rəqəm olmalıdır.");
   message(form, "");
+  const submit = form.querySelector('button[type="submit"], button.primary');
+  const original = submit?.textContent;
+  if (submit) { submit.disabled = true; submit.textContent = "Daxil olunur…"; }
   try {
     const response = await api("/api/login", {
       method: "POST",
@@ -60,6 +63,8 @@ async function login(event) {
       form,
       "Serverə qoşulmaq alınmadı. İnterneti yoxlayıb yenidən cəhd edin.",
     );
+  } finally {
+    if (submit) { submit.disabled = false; submit.textContent = original; }
   }
 }
 
@@ -74,6 +79,9 @@ async function register(event) {
     return message(form, "Şifrə dəqiq 4 rəqəm olmalıdır.");
   data.delete("confirm");
   message(form, "");
+  const submit = form.querySelector('button[type="submit"], button.primary');
+  const original = submit?.textContent;
+  if (submit) { submit.disabled = true; submit.textContent = "Hesab yaradılır…"; }
   try {
     const response = await fetch("/api/register", {
       method: "POST",
@@ -93,6 +101,8 @@ async function register(event) {
       form,
       "Serverə qoşulmaq alınmadı. Qeydiyyat database-ə yazılmadı.",
     );
+  } finally {
+    if (submit) { submit.disabled = false; submit.textContent = original; }
   }
 }
 

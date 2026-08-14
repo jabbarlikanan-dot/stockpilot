@@ -6,6 +6,7 @@ const request = (path, options = {}) =>
     headers: { Authorization: `Bearer ${token}`, ...(options.headers || {}) },
   });
 let me;
+const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[m]));
 function logout() {
   localStorage.removeItem("stockpilotToken");
   location.href = "index.html";
@@ -23,15 +24,15 @@ function startOfWeek(date) {
   return item;
 }
 function paintUser() {
-  const full = `${me.firstName} ${me.lastName}`;
+  const full = esc(`${me.firstName || ""} ${me.lastName || ""}`.trim());
   const avatar = me.photo
     ? `<img class="avatar" src="${me.photo}">`
-    : `<b class="avatar">${me.firstName[0]}</b>`;
+    : `<b class="avatar">${esc((me.firstName || "U")[0])}</b>`;
   document
     .querySelectorAll("#user")
     .forEach(
       (item) =>
-        (item.innerHTML = `${avatar}<span><b>${full}</b><br><small>@${me.username}</small></span>`),
+        (item.innerHTML = `${avatar}<span><b>${full}</b><br><small>@${esc(me.username)}</small></span>`),
     );
 }
 function soldValue(item) {
@@ -105,7 +106,7 @@ function drawStats(state) {
     .slice(0, 3);
   const topProducts = document.getElementById("topProducts");
   if (topProducts)
-    topProducts.innerHTML = `<h2>Ən çox qazandıran 3 məhsul</h2>${top.length ? `<ol>${top.map(([name, profit]) => `<li><span>${name}</span><b>${format(profit)}</b></li>`).join("")}</ol>` : '<p class="notice">Satılmış məhsul olduqda burada görünəcək.</p>'}`;
+    topProducts.innerHTML = `<h2>Ən çox qazandıran 3 məhsul</h2>${top.length ? `<ol>${top.map(([name, profit]) => `<li><span>${esc(name)}</span><b>${format(profit)}</b></li>`).join("")}</ol>` : '<p class="notice">Satılmış məhsul olduqda burada görünəcək.</p>'}`;
 }
 async function boot() {
   let state;

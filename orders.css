@@ -1070,3 +1070,18 @@ select:focus {
     width: 100%;
   }
 }
+
+/* Responsive action bar: funksiyalar gizlənmir, kiçik ekranda sürüşdürülür. */
+@media (max-width: 980px) {
+  .topbar { align-items:flex-start; flex-direction:column; }
+  .topbar > div { width:100%; max-width:100%; overflow-x:auto; padding:2px 0 7px; scrollbar-width:thin; }
+  .topbar > div > button, .topbar > div > .notification-menu { flex:0 0 auto; }
+}
+@media (max-width: 560px) {
+  .topbar { margin-bottom:18px; }
+  .topbar > span { display:none; }
+  .heading { flex-direction:column; }
+  .heading-actions { width:100%; }
+  .heading-actions > * { flex:1; }
+  .modal { width:min(100%, 520px); max-height:calc(100dvh - 24px); border-radius:14px; }
+}

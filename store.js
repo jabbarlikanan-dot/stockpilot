@@ -85,12 +85,31 @@ async function boot() {
     render(); renderCart();
   } catch (error) { $("shopName").textContent = error.message || "Mağaza yüklənmədi"; }
 }
-$("cartButton").onclick = () => $("cart").classList.remove("hidden");
-$("closeCart").onclick = () => $("cart").classList.add("hidden");
+function setCartOpen(open) {
+  $("cart").classList.toggle("hidden", !open);
+  $("cartBackdrop").classList.toggle("hidden", !open);
+  $("cart").setAttribute("aria-hidden", String(!open));
+  $("cartButton").setAttribute("aria-expanded", String(open));
+  document.body.classList.toggle("cart-open", open);
+  if (open) $("closeCart").focus(); else $("cartButton").focus();
+}
+$("cartButton").onclick = () => setCartOpen(true);
+$("closeCart").onclick = () => setCartOpen(false);
+$("cartBackdrop").onclick = () => setCartOpen(false);
+document.addEventListener("keydown", (event) => { if (event.key === "Escape" && !$("cart").classList.contains("hidden")) setCartOpen(false); });
+function syncDeliveryFields() {
+  const address = $("deliveryMethod").value === "address";
+  $("addressField").classList.toggle("hidden", !address);
+  $("metroField").classList.toggle("hidden", address);
+  $("addressField").querySelector("input").required = address;
+  $("metroField").querySelector("input").required = !address;
+}
+$("deliveryMethod").onchange = syncDeliveryFields;
+syncDeliveryFields();
 $("checkout").onsubmit = async (event) => {
   event.preventDefault();
   const message = $("message"); message.textContent = "";
-  if (!cart.length) { message.textContent = "Səbət boşdur."; return; }
+  if (!cart.length) { message.textContent = "Səbət boşdur."; setCartOpen(true); return; }
   const form = new FormData(event.currentTarget);
   const date = String(form.get("preferredDate") || "");
   const time = String(form.get("preferredTime") || "");

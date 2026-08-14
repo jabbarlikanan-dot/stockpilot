@@ -1,7 +1,12 @@
 const json = (x, s = 200) =>
     new Response(JSON.stringify(x), {
       status: s,
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "same-origin",
+      },
     }),
   fail = (e, s = 400) => json({ error: e }, s),
   enc = new TextEncoder();
@@ -39,13 +44,19 @@ async function issue(u, s) {
   return `${h}.${p}.${await mac(`${h}.${p}`, s)}`;
 }
 async function who(r, e) {
-  const v = (r.headers.get("authorization") || "").split(" "),
-    [h, p, s] = (v[1] || "").split(".");
-  if (v[0] !== "Bearer" || !h || s !== (await mac(`${h}.${p}`, e.AUTH_SECRET)))
+  try {
+    if (!e.AUTH_SECRET) return null;
+    const v = (r.headers.get("authorization") || "").split(" "),
+      [h, p, signature] = (v[1] || "").split(".");
+    if (v[0] !== "Bearer" || !h || !p || !signature) return null;
+    const expected = await mac(`${h}.${p}`, e.AUTH_SECRET);
+    if (signature !== expected) return null;
+    const t = JSON.parse(atob(p));
+    if (!t?.sub || !Number.isFinite(Number(t.exp)) || Number(t.exp) < Date.now()) return null;
+    return e.DB.prepare("SELECT * FROM users WHERE id=?").bind(t.sub).first();
+  } catch {
     return null;
-  const t = JSON.parse(atob(p));
-  if (t.exp < Date.now()) return null;
-  return e.DB.prepare("SELECT * FROM users WHERE id=?").bind(t.sub).first();
+  }
 }
 const pub = (u) => ({
   id: u.id,
@@ -56,22 +67,59 @@ const pub = (u) => ({
 });
 const readState = async (e, id) => {
   const row = await e.DB.prepare("SELECT state_json FROM user_state WHERE user_id=?").bind(id).first();
-  return row ? JSON.parse(row.state_json) : { orders: [] };
+  if (!row?.state_json) return { orders: [], customerSales: [] };
+  try {
+    const value = JSON.parse(row.state_json);
+    return value && typeof value === "object" && Array.isArray(value.orders) ? value : { orders: [], customerSales: [] };
+  } catch {
+    return { orders: [], customerSales: [] };
+  }
 };
-const productList = (state) =>
+const validateState = (state) => {
+  if (!state || typeof state !== "object" || Array.isArray(state)) return "State düzgün formatda deyil.";
+  if (!Array.isArray(state.orders)) return "Sifariş siyahısı düzgün formatda deyil.";
+  if (state.orders.length > 2000) return "Sifariş sayı limitdən çoxdur.";
+  for (const order of state.orders) {
+    if (!order || typeof order !== "object" || !Array.isArray(order.items)) return "Sifariş məlumatı düzgün deyil.";
+    if (order.items.length > 5000) return "Bir sifarişdə məhsul sayı limitdən çoxdur.";
+  }
+  const encoded = JSON.stringify(state);
+  if (encoded.length > 8_000_000) return "Məlumat ölçüsü çox böyükdür.";
+  return null;
+};
+const productList = (state, reserved = {}) =>
   (state.orders || []).flatMap((order) =>
-    (order.items || []).map((item, index) => ({
-      id: item.id || `${order.id}:${index}`,
-      name: item.name,
-      category: item.category || "Digər",
-      price: Number(item.sale) || 0,
-      quantity: Number(item.qty) || 0,
-      image: item.img || "",
-      orderId: order.id,
-      index,
-      sold: Boolean(item.sold),
-    })),
+    (order.items || []).map((item, index) => {
+      const id = item.id || `${order.id}:${index}`;
+      const physical = Math.max(0, Number(item.qty) || 0);
+      return {
+        id,
+        name: item.name,
+        category: item.category || "Digər",
+        price: Number(item.sale) || 0,
+        quantity: Math.max(0, physical - (Number(reserved[id]) || 0)),
+        image: item.img || "",
+        orderId: order.id,
+        index,
+        sold: Boolean(item.sold) || physical <= 0,
+      };
+    }),
   );
+async function reservedStock(e, ownerId) {
+  const rows = await e.DB.prepare("SELECT order_json FROM customer_orders WHERE owner_user_id=? AND status NOT IN ('delivered','cancelled')").bind(ownerId).all();
+  const reserved = {};
+  for (const row of rows.results || []) {
+    try {
+      const order = JSON.parse(row.order_json);
+      for (const line of order.cart || []) {
+        const id = String(line.id || "");
+        if (!id) continue;
+        reserved[id] = (reserved[id] || 0) + Math.max(0, Number(line.quantity) || 0);
+      }
+    } catch {}
+  }
+  return reserved;
+}
 const whatsappStatuses = {
   new: "Yeni sifarişiniz qəbul edildi.",
   confirmed: "Sifarişiniz təsdiqləndi.",
@@ -228,8 +276,9 @@ export default {
       const owner = await e.DB.prepare("SELECT * FROM users WHERE username=?").bind(storeMatch[1]).first();
       if (!owner) return fail("Mağaza tapılmadı.", 404);
       const state = await readState(e, owner.id);
-      // Kataloq tam görünür. Stoku 0 olan məhsul sifariş edilmir, amma mağazadan itmir.
-      return json({ shop: { username: owner.username, name: `${owner.first_name} ${owner.last_name}` }, products: productList(state) });
+      const reserved = await reservedStock(e, owner.id);
+      // Kataloq tam görünür; aktiv müştəri sifarişlərində rezerv olunan say mövcud stokdan çıxılır.
+      return json({ shop: { username: owner.username, name: `${owner.first_name} ${owner.last_name}` }, products: productList(state, reserved) });
     }
     const storeOrderMatch = p.match(/^\/api\/store\/([\w.-]{3,30})\/orders$/);
     if (storeOrderMatch && r.method === "POST") {
@@ -238,7 +287,8 @@ export default {
       const body = await r.json();
       const name = String(body.name || "").trim(), phone = String(body.phone || "").trim();
       if (!name || !phone || !Array.isArray(body.cart) || !body.cart.length) return fail("Ad, telefon və məhsullar tələb olunur.");
-      const products = productList(await readState(e, owner.id));
+      const reserved = await reservedStock(e, owner.id);
+      const products = productList(await readState(e, owner.id), reserved);
       const cart = [];
       for (const line of body.cart) {
         const product = products.find((x) => String(x.id) === String(line.id) && !x.sold);
@@ -299,20 +349,17 @@ export default {
     }
     if (p === "/api/state") {
       if (!user) return fail("Giriş tələb olunur.", 401);
-      if (r.method === "GET") {
-        const row = await e.DB.prepare(
-          "SELECT state_json FROM user_state WHERE user_id=?",
-        )
-          .bind(user.id)
-          .first();
-        return json({ state: JSON.parse(row.state_json) });
-      }
+      if (r.method === "GET") return json({ state: await readState(e, user.id) });
       if (r.method === "PUT") {
-        const { state } = await r.json();
+        let body;
+        try { body = await r.json(); } catch { return fail("JSON düzgün deyil."); }
+        const state = body?.state;
+        const validationError = validateState(state);
+        if (validationError) return fail(validationError);
         await e.DB.prepare(
-          "UPDATE user_state SET state_json=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?",
+          "INSERT INTO user_state(user_id,state_json,updated_at) VALUES(?,?,CURRENT_TIMESTAMP) ON CONFLICT(user_id) DO UPDATE SET state_json=excluded.state_json,updated_at=CURRENT_TIMESTAMP",
         )
-          .bind(JSON.stringify(state), user.id)
+          .bind(user.id, JSON.stringify(state))
           .run();
         return json({ ok: true });
       }

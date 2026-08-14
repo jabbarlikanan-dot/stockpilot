@@ -3,10 +3,25 @@ if (!token) location.href = "index.html";
 const api = (path, options = {}) => fetch(path, { ...options, headers: { Authorization: `Bearer ${token}`, ...(options.headers || {}) } });
 const logout = () => { localStorage.removeItem("stockpilotToken"); location.href = "index.html"; };
 function paint(user) {
-  const full = `${user.firstName} ${user.lastName}`;
-  document.getElementById("user").innerHTML = `${user.photo ? `<img class="avatar" src="${user.photo}">` : `<b class="avatar">${user.firstName[0]}</b>`}<span><b>${full}</b><br><small>@${user.username}</small></span>`;
-  document.getElementById("profileHero").innerHTML = `<div class="hero-avatar">${user.photo ? `<img src="${user.photo}">` : user.firstName[0]}</div><h2>${full}</h2><p>@${user.username}</p>`;
+  const full = `${user.firstName || ""} ${user.lastName || ""}`.trim();
+  const userRoot = document.getElementById("user");
+  userRoot.replaceChildren();
+  const avatar = user.photo ? Object.assign(document.createElement("img"), { className: "avatar", src: user.photo, alt: "" }) : Object.assign(document.createElement("b"), { className: "avatar", textContent: (user.firstName || "U")[0].toUpperCase() });
+  const userCopy = document.createElement("span");
+  const name = document.createElement("b"); name.textContent = full;
+  const br = document.createElement("br");
+  const username = document.createElement("small"); username.textContent = `@${user.username || ""}`;
+  userCopy.append(name, br, username); userRoot.append(avatar, userCopy);
+
+  const hero = document.getElementById("profileHero");
+  hero.replaceChildren();
+  const heroAvatar = document.createElement("div"); heroAvatar.className = "hero-avatar";
+  if (user.photo) heroAvatar.append(Object.assign(document.createElement("img"), { src: user.photo, alt: "" })); else heroAvatar.textContent = (user.firstName || "U")[0].toUpperCase();
+  const h2 = document.createElement("h2"); h2.textContent = full;
+  const p = document.createElement("p"); p.textContent = `@${user.username || ""}`;
+  hero.append(heroAvatar, h2, p);
 }
+
 async function boot() {
   const res = await api("/api/me");
   if (!res.ok) return logout();
@@ -22,8 +37,8 @@ async function boot() {
     const msg = document.getElementById("message");
     if (body.newPassword && !/^\d{4}$/.test(body.newPassword)) return (msg.textContent = "Yeni şifrə 4 rəqəmli olmalıdır.");
     const update = await api("/api/profile", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
-    const data = await update.json();
-    if (!update.ok) return (msg.textContent = data.error || "Dəyişiklik yadda saxlanmadı.");
+    const data = await update.json().catch(() => ({}));
+    if (!update.ok) { msg.className = "msg"; return (msg.textContent = data.error || "Dəyişiklik yadda saxlanmadı."); }
     localStorage.stockpilotToken = data.token;
     user = data.user;
     paint(user);

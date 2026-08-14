@@ -4,13 +4,24 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width,initial-scale=1" />
     <meta name="theme-color" content="#080b07" />
+    <meta name="description" content="StockPilot onlayn mağaza kataloqu" />
     <link rel="icon" type="image/png" href="stockpilot-192.png" />
     <title>Mağaza — StockPilot</title>
     <link rel="stylesheet" href="store.css" />
   </head>
   <body>
-    <header class="store-header"><a href="index.html" aria-label="StockPilot ana səhifə"><img src="stockpilot-logo.png" alt="StockPilot" class="store-logo" /></a><button id="cartButton">Səbət <b id="cartCount">0</b></button></header>
-    <main><section class="hero"><p id="shopTag">ONLAYN MAĞAZA</p><h1 id="shopName">Mağaza yüklənir…</h1><p>Məhsulları seçin, rahat şəkildə sifariş edin.</p></section><div id="categories" class="categories"></div><section id="products" class="products"></section></main>
-    <aside id="cart" class="cart hidden" aria-label="Səbət"><header><b>Səbətiniz</b><button id="closeCart" aria-label="Səbəti bağla">×</button></header><div id="cartLines"></div><form id="checkout"><h2>Sifarişi tamamla</h2><input name="name" placeholder="Ad və soyad" required><input name="phone" inputmode="tel" placeholder="Telefon nömrəsi" required><textarea name="note" placeholder="Əlavə qeyd (istəyə bağlı)"></textarea><div class="schedule"><label>Çatdırılma tarixi<input id="preferredDate" name="preferredDate" type="date" required></label><label>Çatdırılma saatı (24 saat)<input id="preferredTime" name="preferredTime" type="text" inputmode="numeric" placeholder="14:30" pattern="(?:[01][0-9]|2[0-3]):[0-5][0-9]" required></label></div><select name="delivery"><option value="metro">Metroda təhvil</option><option value="address">Ünvana çatdırılma</option></select><input name="metro" placeholder="Metro / rayon"><input name="address" placeholder="Tam ünvan"><select name="payment"><option value="cash">Nağd ödəniş</option><option value="card">Kartla ödəniş (çatdırılmada)</option></select><button class="buy" type="submit">Sifarişi göndər</button><p id="message" role="alert"></p></form></aside><div id="toast" class="store-toast" role="status" aria-live="polite"></div><script src="store.js"></script>
+    <header class="store-header"><a href="index.html" aria-label="StockPilot ana səhifə"><img src="stockpilot-logo.png" alt="StockPilot" class="store-logo" /></a><button id="cartButton" aria-controls="cart" aria-expanded="false">Səbət <b id="cartCount">0</b></button></header>
+    <main><section class="hero"><p id="shopTag">ONLAYN MAĞAZA</p><h1 id="shopName">Mağaza yüklənir…</h1><p>Məhsulları seçin, səbətə əlavə edin və uyğun çatdırılma vaxtını qeyd edin.</p></section><div id="categories" class="categories" aria-label="Məhsul kateqoriyaları"></div><section id="products" class="products" aria-live="polite"></section></main>
+    <div id="cartBackdrop" class="cart-backdrop hidden"></div>
+    <aside id="cart" class="cart hidden" aria-label="Səbət" aria-hidden="true"><header><b>Səbətiniz</b><button id="closeCart" aria-label="Səbəti bağla">×</button></header><div id="cartLines"></div><form id="checkout"><h2>Sifarişi tamamla</h2>
+      <label class="checkout-field"><span>Ad və soyad</span><input name="name" autocomplete="name" required></label>
+      <label class="checkout-field"><span>Telefon nömrəsi</span><input name="phone" inputmode="tel" autocomplete="tel" placeholder="050 000 00 00" required></label>
+      <label class="checkout-field"><span>Əlavə qeyd <small>istəyə bağlı</small></span><textarea name="note" placeholder="Məsələn: zəng etmədən əvvəl mesaj yazın"></textarea></label>
+      <div class="schedule"><label>Çatdırılma tarixi<input id="preferredDate" name="preferredDate" type="date" required></label><label>Çatdırılma saatı<input id="preferredTime" name="preferredTime" type="time" step="300" required></label></div>
+      <label class="checkout-field"><span>Çatdırılma üsulu</span><select id="deliveryMethod" name="delivery"><option value="metro">Metroda təhvil</option><option value="address">Ünvana çatdırılma</option></select></label>
+      <label id="metroField" class="checkout-field"><span>Metro / rayon</span><input name="metro" autocomplete="address-level2"></label>
+      <label id="addressField" class="checkout-field hidden"><span>Tam ünvan</span><input name="address" autocomplete="street-address"></label>
+      <label class="checkout-field"><span>Ödəniş</span><select name="payment"><option value="cash">Nağd ödəniş</option><option value="card">Kartla ödəniş (çatdırılmada)</option></select></label>
+      <button class="buy" type="submit">Sifarişi göndər</button><p id="message" role="alert" aria-live="assertive"></p></form></aside><div id="toast" class="store-toast" role="status" aria-live="polite"></div><script src="store.js"></script>
   </body>
 </html>
