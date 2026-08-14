@@ -35,12 +35,15 @@ state.ui = {
   filtersOpen: false,
   productFormOpen: false,
   panel: "personal",
+  customerView: "all",
   ...(state.ui || {}),
 };
 let pendingImage = "",
   editing = null,
   lastDeleted = null;
-const isCustomerPage = location.pathname.endsWith("customer-orders.html");
+const isCustomerPage =
+  location.pathname.endsWith("customer-orders.html") ||
+  location.pathname.endsWith("customer-orders");
 state.customerOrders = window.__customerOrders || [];
 const $ = (id) => document.getElementById(id);
 const money = (n) =>
@@ -60,10 +63,20 @@ const esc = (s) =>
         "'": "&#039;",
       })[m],
   );
-const save = () => {
+let saveTimer = null;
+const save = (now = false) => {
   state.ui.lastSavedAt = new Date().toISOString();
-  window.persistStockState(state);
+  clearTimeout(saveTimer);
+  const persist = () => window.persistStockState(state);
+  if (now) return persist();
+  saveTimer = setTimeout(persist, 280);
 };
+window.addEventListener("pagehide", () => {
+  if (!saveTimer) return;
+  clearTimeout(saveTimer);
+  saveTimer = null;
+  window.persistStockState(state);
+});
 const active = () => state.orders.find((o) => o.id === state.active);
 const country = (k) => state.countries[k] || state.countries.america;
 const shipping = (g, k) => {
@@ -199,7 +212,7 @@ function customerHistory() {
   );
   showModal(
     "Bütün müştəri sifarişləri",
-    `<p class="hint">Tamamlanan və ya ləğv edilən sifarişlər əsas ekrandan çıxarılır, burada tarixçədə qalır.</p><div class="customer-history">${history.length ? history.map((order) => customerOrderCard(order)).join("") : "<p class=\"hint\">Hələ müştəri sifarişi yoxdur.</p>"}</div>`,
+    `<p class="hint">Burada bütün statuslardakı sifarişlər göstərilir.</p><div class="customer-history">${history.length ? history.map((order) => customerOrderCard(order)).join("") : "<p class=\"hint\">Hələ müştəri sifarişi yoxdur.</p>"}</div>`,
   );
   bindCustomerOrderActions();
 }
@@ -392,10 +405,33 @@ function compactPanels(order) {
   );
 }
 function renderCustomerPanel() {
-  const activeOrders = state.customerOrders.filter((order) => !terminalCustomerStatus.has(order.status));
-  const completedOrders = state.customerOrders.filter((order) => terminalCustomerStatus.has(order.status));
-  $("content").innerHTML = `<section class="box customer-orders customer-panel"><div class="customer-heading"><div><h2>Müştəri sifarişləri</h2><p>${activeOrders.length} aktiv · ${completedOrders.length} tamamlanan və ya ləğv edilən</p></div><button id="customerHistory" class="secondary">Ümumi tarixçə (${state.customerOrders.length})</button></div>${activeOrders.length ? activeOrders.map((order) => customerOrderCard(order)).join("") : '<p class="hint">Hazırda aktiv müştəri sifarişi yoxdur.</p>'}</section>`;
+  const counts = Object.fromEntries(
+    Object.keys(customerStatus).map((status) => [
+      status,
+      state.customerOrders.filter((order) => order.status === status).length,
+    ]),
+  );
+  const shown = state.ui.customerView === "all"
+    ? state.customerOrders
+    : state.customerOrders.filter((order) => order.status === state.ui.customerView);
+  const filterButton = (value, label, count) =>
+    `<button class="${state.ui.customerView === value ? "primary" : "secondary"}" data-customer-filter="${value}">${label} (${count})</button>`;
+  $("content").innerHTML = `<section class="box customer-orders customer-panel"><div class="customer-heading"><div><h2>Müştəri sifarişləri</h2><p>${state.customerOrders.length} ümumi sifariş · səhifə açıq olduqda avtomatik yenilənir.</p></div><div class="customer-actions"><button id="refreshCustomerOrders" class="secondary">Yenilə</button><button id="customerHistory" class="secondary">Tarixçə</button></div></div><div class="customer-filters">${filterButton("all", "Hamısı", state.customerOrders.length)}${filterButton("new", "Yeni", counts.new)}${filterButton("confirmed", "Təsdiqləndi", counts.confirmed)}${filterButton("preparing", "Hazırlanır", counts.preparing)}${filterButton("courier", "Kuryerdə", counts.courier)}${filterButton("delivered", "Tamamlandı", counts.delivered)}${filterButton("cancelled", "Ləğv edildi", counts.cancelled)}</div>${shown.length ? shown.map((order) => customerOrderCard(order)).join("") : '<p class="hint">Bu filtr üçün sifariş yoxdur.</p>'}</section>`;
   if ($("customerHistory")) $("customerHistory").onclick = customerHistory;
+  if ($("refreshCustomerOrders")) $("refreshCustomerOrders").onclick = async () => {
+    try {
+      await refreshCustomerOrders();
+      render();
+    } catch {
+      alert("Sifarişlər yenilənmədi. Giriş sessiyasını yeniləyin.");
+    }
+  };
+  document.querySelectorAll("[data-customer-filter]").forEach((button) => {
+    button.onclick = () => {
+      state.ui.customerView = button.dataset.customerFilter;
+      render();
+    };
+  });
   bindCustomerOrderActions();
 }
 function render() {
@@ -588,15 +624,21 @@ function hideModal() {
   $("modal").classList.add("hidden");
 }
 function tariffSettings() {
+  const bands = [
+    ["0–100 qr", "Bu çəkiyə qədər sabit qiymət"],
+    ["101–250 qr", "Bu çəkiyə qədər sabit qiymət"],
+    ["251–500 qr", "Bu çəkiyə qədər sabit qiymət"],
+    ["501 qr – 1 kq", "1 kq-dan yuxarı hər başlanmış kq üçün"],
+  ];
   const rows = Object.entries(state.countries)
     .map(
       ([k, c]) =>
-        `<div class="country-editor"><div class="tariff-title"><input data-country-name="${k}" value="${esc(c.name)}" aria-label="Ölkə adı"><input data-currency="${k}" value="${esc(c.currency)}" maxlength="3" aria-label="Valyuta"><span>Tarif sırası: 0–100 / 101–250 / 251–500 / 501–1000 qr</span></div>${c.tariffs.map((v, n) => `<input data-country="${k}" data-tariff="${n}" type="number" step=".01" value="${v}" aria-label="Tarif ${n + 1}">`).join("")}<input data-rate="${k}" type="number" step=".01" value="${c.rate}" title="AZN məzənnəsi" aria-label="AZN məzənnəsi"></div>`,
+        `<section class="country-editor tariff-editor"><div class="tariff-title"><label>Ölkə adı<input data-country-name="${k}" value="${esc(c.name)}" aria-label="Ölkə adı"></label><label>Valyuta<input data-currency="${k}" value="${esc(c.currency)}" maxlength="3" aria-label="Valyuta"></label><label>1 vahid = AZN<input data-rate="${k}" type="number" min="0" step=".01" value="${c.rate}" aria-label="AZN məzənnəsi"></label></div><div class="tariff-bands">${c.tariffs.map((v, n) => `<label><b>${bands[n][0]}</b><small>${bands[n][1]}</small><span><input data-country="${k}" data-tariff="${n}" type="number" min="0" step=".01" value="${v}" aria-label="${bands[n][0]} karqo tarifi">${esc(c.currency)}</span></label>`).join("")}</div></section>`,
     )
     .join("");
   showModal(
     "Tarif və məzənnə ayarları",
-    `<p class="hint">Buradan tarif planını istədiyiniz vaxt dəyişə bilərsiniz. Son xana seçilmiş valyutanın 1 vahidinin AZN məzənnəsidir.</p>${rows}<button id="saveTariffs" class="primary" style="margin-top:12px">Tarifləri yadda saxla</button>`,
+    `<p class="hint">Hər ölkənin karqo planını ayrıca dəyişin. 1 kq-dan ağır məhsulda son qiymət hər başlanmış kq üçün tətbiq olunur və AZN məbləği avtomatik hesablanır.</p>${rows}<button id="saveTariffs" class="primary" style="margin-top:12px">Tarifləri yadda saxla</button>`,
   );
   $("saveTariffs").onclick = () => {
     document
@@ -615,7 +657,7 @@ function tariffSettings() {
     document.querySelectorAll("[data-currency]").forEach((x) => {
       state.countries[x.dataset.currency].currency = x.value.trim() || "₼";
     });
-    save();
+    save(true);
     hideModal();
     render();
   };
@@ -815,11 +857,26 @@ window.startStockPilot = () => {
   $("profileBtn").onclick = () => (location.href = "profile.html");
   if (isCustomerPage) {
     $("personalOrdersPanel").onclick = () => (location.href = "dashboard.html");
+    const refreshWhenVisible = async () => {
+      if (document.visibilityState === "visible") {
+        try {
+          await refreshCustomerOrders();
+          render();
+        } catch {
+          // Sessiya bitibsə səhifə mövcud məlumatı göstərməyə davam edir.
+        }
+      }
+    };
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
   } else {
     $("customerOrdersPanel").onclick = () => (location.href = "customer-orders.html");
   }
   $("openStats").onclick = () => (location.href = "account.html");
-  $("openSettings").onclick = tariffSettings;
+  $("openSettings").onclick = (event) => {
+    event.preventDefault();
+    tariffSettings();
+  };
   if ($("newOrderTop")) $("newOrderTop").onclick = newOrder;
   if ($("archiveToggle")) $("archiveToggle").onclick = () => {
     state.ui.showArchived = !state.ui.showArchived;
@@ -845,6 +902,7 @@ window.startStockPilot = () => {
     importItems(event.target.files[0]);
     event.target.value = "";
   };
+  if (location.hash === "#tariffs") setTimeout(tariffSettings, 0);
   $("closeModal").onclick = hideModal;
   $("modal").onclick = (e) => {
     if (e.target === $("modal")) hideModal();

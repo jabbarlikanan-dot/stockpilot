@@ -1,0 +1,139 @@
+/* StockPilot üçün bütün daxili səhifələrdə ortaq, yüngül naviqasiya qabığı */
+:root {
+  --sidebar-width: 244px;
+  --sidebar-compact-width: 72px;
+}
+
+.app-shell {
+  min-height: 100vh;
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
+  background: var(--bg, #090b08);
+}
+
+.app-shell.is-sidebar-compact {
+  grid-template-columns: var(--sidebar-compact-width) minmax(0, 1fr);
+}
+
+.app-sidebar {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100vh;
+  overflow: hidden;
+  padding: 16px 12px;
+  background: linear-gradient(180deg, #10140e 0%, #0b0f0a 100%);
+  border-right: 1px solid var(--line, #303a29);
+}
+
+.sidebar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-height: 42px;
+  margin-bottom: 24px;
+}
+
+.sidebar-brand {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+  gap: 9px;
+  color: var(--text, #f2f6ed);
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: -0.6px;
+  text-decoration: none;
+}
+
+.brand-badge {
+  display: grid;
+  flex: 0 0 32px;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border-radius: 9px;
+  background: var(--lime, #c6d92c);
+  color: #10140c;
+}
+
+.brand-badge svg,
+.sidebar-toggle svg,
+.app-nav svg,
+.mobile-bottom svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+.sidebar-toggle {
+  display: grid;
+  flex: 0 0 34px;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--muted, #9ca895);
+}
+
+.sidebar-toggle:hover { background: #1d2419; color: var(--lime, #c6d92c); }
+.nav-caption { margin: 0 10px 8px; color: #77836f; font-size: 10px; font-weight: 800; letter-spacing: 1.1px; text-transform: uppercase; }
+
+.app-nav { display: grid; gap: 4px; }
+.app-nav a,
+.app-nav button {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  min-height: 42px;
+  gap: 12px;
+  padding: 10px 11px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: #b3bcae;
+  font: 750 14px/1.2 Arial, sans-serif;
+  text-align: left;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.app-nav a:hover,
+.app-nav button:hover,
+.app-nav a.active,
+.app-nav button.active { background: #252e1d; color: var(--lime, #c6d92c); }
+.app-nav svg { flex: 0 0 18px; }
+.nav-label { overflow: hidden; text-overflow: ellipsis; }
+.sidebar-foot { margin-top: auto; padding: 14px 10px 0; border-top: 1px solid var(--line, #303a29); color: #77836f; font-size: 11px; white-space: nowrap; }
+
+.app-shell.is-sidebar-compact .sidebar-head { justify-content: center; }
+.app-shell.is-sidebar-compact .sidebar-brand { width: 32px; overflow: hidden; }
+.app-shell.is-sidebar-compact .sidebar-toggle,
+.app-shell.is-sidebar-compact .nav-caption,
+.app-shell.is-sidebar-compact .nav-label,
+.app-shell.is-sidebar-compact .sidebar-foot { display: none; }
+.app-shell.is-sidebar-compact .app-nav a,
+.app-shell.is-sidebar-compact .app-nav button { justify-content: center; padding-inline: 0; }
+
+/* Sürətli alt menyu yalnız telefon ölçüsündə görünür. */
+.mobile-bottom { display: none; }
+
+@media (max-width: 760px) {
+  .app-shell,
+  .app-shell.is-sidebar-compact { display: block; }
+  .app-sidebar { display: none; }
+  .app-main { padding-bottom: 82px !important; }
+  .mobile-bottom { position: fixed; z-index: 50; right: 0; bottom: 0; left: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 8px 7px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line, #303a29); background: #10140ef5; backdrop-filter: blur(12px); }
+  .mobile-bottom a { display: grid; min-height: 46px; grid-template-rows: 18px auto; place-items: center; gap: 3px; border-radius: 9px; color: var(--muted, #9ca895); font-size: 10px; font-weight: 800; line-height: 1; text-align: center; text-decoration: none; }
+  .mobile-bottom svg { width: 17px; height: 17px; }
+  .mobile-bottom a.active { background: #252e1d; color: var(--lime, #c6d92c); }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .app-shell { transition: grid-template-columns 180ms ease; }
+  .sidebar-brand, .nav-label, .nav-caption, .sidebar-foot { transition: opacity 140ms ease; }
+}
