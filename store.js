@@ -4,10 +4,11 @@ let cart = [];
 let category = "Hamısı";
 let visibleProducts = 12;
 let productQuery = "";
+let stockFilter = "all";
+let productSort = "default";
 const $ = (id) => document.getElementById(id);
 const money = (n) => `${(Number(n) || 0).toLocaleString("az-AZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₼`;
 const esc = (s) => String(s || "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[m]);
-const QUICK_TIMES = ["09:00", "11:00", "13:00", "15:00", "17:00", "19:00", "21:00"];
 
 function showToast(text) {
   const toast = $("toast");
@@ -37,9 +38,8 @@ function formatDayLabel(dateString) {
 function buildTimeOptions() {
   const select = $("preferredTime");
   const options = [];
-  for (let hour = 8; hour <= 22; hour += 1) {
+  for (let hour = 0; hour <= 23; hour += 1) {
     for (const minute of [0, 30]) {
-      if (hour === 22 && minute > 0) continue;
       const value = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
       options.push(`<option value="${value}">${value}</option>`);
     }
@@ -54,48 +54,23 @@ function setupSchedule() {
   const preferred = $("preferredTime");
   const defaultTime = localTime();
   preferred.value = Array.from(preferred.options).some((option) => option.value === defaultTime) ? defaultTime : "10:00";
-  renderDateChoices();
-  renderTimeChoices();
-}
-function renderDateChoices() {
-  const dateInput = $("preferredDate");
-  const today = localDate();
-  const choices = [
-    { label: "Bu gün", value: today },
-    { label: "Sabah", value: addDays(today, 1) },
-    { label: "Birigün", value: addDays(today, 2) },
-  ];
-  $("dateChoices").innerHTML = choices.map((choice) => `
-    <button type="button" class="choice-chip ${dateInput.value === choice.value ? "active" : ""}" data-date-choice="${choice.value}">
-      ${choice.label} · ${formatDayLabel(choice.value)}
-    </button>`).join("");
-  document.querySelectorAll("[data-date-choice]").forEach((button) => {
-    button.onclick = () => {
-      dateInput.value = button.dataset.dateChoice;
-      renderDateChoices();
-    };
-  });
-}
-function renderTimeChoices() {
-  const timeSelect = $("preferredTime");
-  $("timeChoices").innerHTML = QUICK_TIMES.map((time) => `
-    <button type="button" class="choice-chip ${timeSelect.value === time ? "active" : ""}" data-time-choice="${time}">${time}</button>
-  `).join("");
-  document.querySelectorAll("[data-time-choice]").forEach((button) => {
-    button.onclick = () => {
-      timeSelect.value = button.dataset.timeChoice;
-      renderTimeChoices();
-    };
-  });
+
 }
 function filteredProducts() {
-  return products.filter((product) => {
+  const filtered = products.filter((product) => {
     const matchesCategory = category === "Hamısı" || product.category === category;
     const haystack = `${product.name || ""} ${product.category || ""}`.toLocaleLowerCase("az");
     const matchesQuery = !productQuery || haystack.includes(productQuery);
-    return matchesCategory && matchesQuery;
+    const qty = Number(product.quantity) || 0;
+    const matchesStock = stockFilter === "all" || (stockFilter === "available" && qty > 0) || (stockFilter === "low" && qty > 0 && qty <= 3);
+    return matchesCategory && matchesQuery && matchesStock;
   });
+  if (productSort === "name") filtered.sort((a,b) => String(a.name || "").localeCompare(String(b.name || ""), "az"));
+  if (productSort === "priceAsc") filtered.sort((a,b) => Number(a.price || 0) - Number(b.price || 0));
+  if (productSort === "priceDesc") filtered.sort((a,b) => Number(b.price || 0) - Number(a.price || 0));
+  return filtered;
 }
+
 function render() {
   const categories = ["Hamısı", ...new Set(products.map((product) => product.category || "Digər"))];
   $("categories").innerHTML = categories.map((name) => `<button class="${name === category ? "active" : ""}" data-category="${esc(name)}">${esc(name)}</button>`).join("");
@@ -112,7 +87,7 @@ function render() {
         </div>
         <div class="product-meta">
           <small>${esc(product.category || "Digər")}</small>
-          <span class="stock-badge">${available ? `Stokda ${quantity}` : "Stokda yoxdur"}</span>
+          ${available ? "" : '<span class="stock-badge out">Stokda yoxdur</span>'}
         </div>
         <h2>${esc(product.name)}</h2>
         <footer>
@@ -219,8 +194,8 @@ $("productSearch").addEventListener("input", (event) => {
   visibleProducts = 12;
   render();
 });
-$("preferredDate").addEventListener("change", renderDateChoices);
-$("preferredTime").addEventListener("change", renderTimeChoices);
+$("stockFilter").addEventListener("change", (event) => { stockFilter = event.target.value; visibleProducts = 12; render(); });
+$("productSort").addEventListener("change", (event) => { productSort = event.target.value; visibleProducts = 12; render(); });
 
 function syncDeliveryFields() {
   const delivery = document.querySelector('input[name="delivery"]:checked')?.value || "metro";

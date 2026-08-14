@@ -280,6 +280,30 @@ export default {
       // Kataloq tam görünür; aktiv müştəri sifarişlərində rezerv olunan say mövcud stokdan çıxılır.
       return json({ shop: { username: owner.username, name: `${owner.first_name} ${owner.last_name}` }, products: productList(state, reserved) });
     }
+    const storeTrackMatch = p.match(/^\/api\/store\/([\w.-]{3,30})\/orders\/([0-9a-fA-F-]{36})$/);
+    if (storeTrackMatch && r.method === "GET") {
+      const owner = await e.DB.prepare("SELECT id FROM users WHERE username=?").bind(storeTrackMatch[1]).first();
+      if (!owner) return fail("Mağaza tapılmadı.", 404);
+      const row = await e.DB.prepare("SELECT order_json,status FROM customer_orders WHERE id=? AND owner_user_id=?").bind(storeTrackMatch[2], owner.id).first();
+      if (!row) return fail("Sifariş tapılmadı.", 404);
+      let order;
+      try { order = JSON.parse(row.order_json); } catch { return fail("Sifariş məlumatı oxunmadı.", 500); }
+      return json({
+        id: order.id,
+        status: row.status,
+        createdAt: order.createdAt,
+        preferredAt: order.customer?.preferredAt || "",
+        delivery: order.customer?.delivery || "",
+        total: Number(order.total) || 0,
+        cart: (order.cart || []).map((item) => ({
+          id: item.id,
+          name: item.name,
+          image: item.image || "",
+          price: Number(item.price) || 0,
+          quantity: Math.max(1, Number(item.quantity) || 1),
+        })),
+      });
+    }
     const storeOrderMatch = p.match(/^\/api\/store\/([\w.-]{3,30})\/orders$/);
     if (storeOrderMatch && r.method === "POST") {
       const owner = await e.DB.prepare("SELECT * FROM users WHERE username=?").bind(storeOrderMatch[1]).first();

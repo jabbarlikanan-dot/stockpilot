@@ -27,39 +27,22 @@
         <div class="hero-copy">
           <p id="shopTag" class="eyebrow">ONLAYN MAĞAZA</p>
           <h1 id="shopName">Mağaza yüklənir…</h1>
-          <p class="hero-text">
-            Məhsulları rahat seçin, səbətə əlavə edin və çatdırılma vaxtını
-            <strong>24 saat formatında</strong> tez bir şəkildə müəyyən edin.
-          </p>
-          <div class="hero-points">
-            <span>24 saat vaxt seçimi</span>
-            <span>Mobil və desktop üçün rahat</span>
-            <span>Sürətli checkout</span>
-          </div>
+          <p class="hero-text">Məhsulları seçin, səbətə əlavə edin və sifarişi bir neçə sadə addımla tamamlayın.</p>
+
         </div>
-        <aside class="hero-panel" aria-label="Sifariş üstünlükləri">
-          <div class="hero-panel-card">
-            <small>Rahat sifariş</small>
-            <b>Çox addım yoxdur</b>
-            <p>Tarix, saat və çatdırılma üsulu sadələşdirilib.</p>
-          </div>
-          <div class="hero-panel-card">
-            <small>Vaxt seçimi</small>
-            <b>09:00 · 12:00 · 15:00</b>
-            <p>Bir toxunuşla seç və ya tam 24 saat formatında vaxt göstər.</p>
+        <aside class="hero-panel store-filter-panel" aria-label="Məhsul filtrləri">
+          <div class="filter-panel-head"><div><small>KATALOQ</small><b>Məhsulu tap</b></div><span id="productCount" class="results-pill">0 məhsul</span></div>
+          <label class="search-field" aria-label="Məhsul adı ilə axtar">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4a6 6 0 1 0 0 12 6 6 0 0 0 0-12m0-2a8 8 0 1 1 0 16 8 8 0 0 1 0-16m11 19-4.35-4.35 1.4-1.4L22.4 19.6z"/></svg>
+            <input id="productSearch" type="search" placeholder="Məhsul adı ilə axtar..." autocomplete="off" />
+          </label>
+          <div><span class="filter-label">Kateqoriya</span><div id="categories" class="categories" aria-label="Məhsul kateqoriyaları"></div></div>
+          <div class="store-filter-grid">
+            <label><span class="filter-label">Stok</span><select id="stockFilter"><option value="all">Hamısı</option><option value="available">Stokda olanlar</option><option value="low">Az qalanlar</option></select></label>
+            <label><span class="filter-label">Sırala</span><select id="productSort"><option value="default">Standart</option><option value="name">Ada görə</option><option value="priceAsc">Qiymət: aşağıdan</option><option value="priceDesc">Qiymət: yuxarıdan</option></select></label>
           </div>
         </aside>
       </section>
-
-      <section class="catalog-toolbar">
-        <label class="search-field" aria-label="Məhsul axtar">
-          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4a6 6 0 1 0 0 12 6 6 0 0 0 0-12m0-2a8 8 0 1 1 0 16 8 8 0 0 1 0-16m11 19-4.35-4.35 1.4-1.4L22.4 19.6z"/></svg>
-          <input id="productSearch" type="search" placeholder="Məhsul axtar..." autocomplete="off" />
-        </label>
-        <div id="productCount" class="results-pill">0 məhsul</div>
-      </section>
-
-      <div id="categories" class="categories" aria-label="Məhsul kateqoriyaları"></div>
       <section id="products" class="products" aria-live="polite"></section>
     </main>
 
@@ -109,11 +92,7 @@
         </section>
 
         <section class="checkout-section">
-          <div class="section-head">
-            <h2>2. Çatdırılma vaxtı</h2>
-            <p>24 saat formatı ilə daha rahat seçim.</p>
-          </div>
-          <div id="dateChoices" class="choice-grid choice-grid-dates" aria-label="Sürətli tarix seçimi"></div>
+          <div class="section-head"><h2>2. Çatdırılma vaxtı</h2></div>
           <div class="checkout-grid checkout-grid-two compact-top">
             <label class="checkout-field">
               <span>Tarix</span>
@@ -124,15 +103,11 @@
               <select id="preferredTime" name="preferredTime" required></select>
             </label>
           </div>
-          <div id="timeChoices" class="choice-grid choice-grid-times" aria-label="Sürətli saat seçimi"></div>
-          <p class="helper-text">Məsələn: 09:00, 14:30, 19:00. PM/AM yoxdur.</p>
+
         </section>
 
         <section class="checkout-section">
-          <div class="section-head">
-            <h2>3. Çatdırılma və ödəniş</h2>
-            <p>Bir toxunuşla seçim et.</p>
-          </div>
+          <div class="section-head"><h2>3. Çatdırılma və ödəniş</h2></div>
 
           <fieldset class="option-group">
             <legend>Çatdırılma üsulu</legend>

@@ -8,25 +8,43 @@
     <title>Sifariş qəbul edildi — StockPilot</title>
     <link rel="stylesheet" href="store.css" />
     <link rel="stylesheet" href="store-success.css" />
-      <link rel="stylesheet" href="redesign.css" />
-</head>
+  </head>
   <body>
     <main class="success-wrap">
-      <section class="success-card">
+      <section class="success-card success-card-wide">
         <div class="success-mark">✓</div>
-        <img src="stockpilot-logo.png" alt="StockPilot" style="display:block;width:150px;height:36px;object-fit:contain;margin:0 auto 18px" />
+        <img src="stockpilot-logo.png" alt="StockPilot" class="success-logo" />
         <h1>Sifarişiniz qəbul edildi</h1>
-        <p>Məhsulunuz qısa müddət ərzində hazırlanacaq və çatdırılma üçün sizinlə əlaqə saxlanılacaqdır.</p>
-        <p id="orderRef"></p>
-        <a id="returnStore" href="store.html">Mağazaya qayıt</a>
+        <p>Sifarişinizin vəziyyətini istənilən vaxt QR kodla izləyə bilərsiniz.</p>
+
+        <div class="tracking-grid">
+          <div class="qr-card">
+            <span class="qr-label">SİFARİŞİ İZLƏ</span>
+            <img id="trackingQr" class="tracking-qr" alt="Sifariş izləmə QR kodu" />
+            <small>Telefonun kamerası ilə QR kodu oxudun.</small>
+          </div>
+          <div class="tracking-info">
+            <span class="tracking-kicker">Sifariş kodu</span>
+            <strong id="orderRef">—</strong>
+            <p>QR işləməsə, aşağıdakı düymə ilə izləmə səhifəsini aça bilərsiniz.</p>
+            <a id="trackOrder" class="track-order-btn" href="#">Sifarişi izlə</a>
+          </div>
+        </div>
+
+        <a id="returnStore" class="return-store" href="store.html">Mağazaya qayıt</a>
       </section>
     </main>
     <script>
       const params = new URLSearchParams(location.search);
       const shop = params.get('shop') || '';
       const orderId = params.get('id') || '';
+      const trackUrl = new URL('order-track.html', location.href);
+      trackUrl.searchParams.set('shop', shop);
+      trackUrl.searchParams.set('id', orderId);
       document.getElementById('returnStore').href = `store.html?shop=${encodeURIComponent(shop)}`;
-      document.getElementById('orderRef').textContent = orderId ? `Sifariş kodu: ${orderId.slice(0, 8).toUpperCase()}` : '';
+      document.getElementById('trackOrder').href = trackUrl.href;
+      document.getElementById('orderRef').textContent = orderId ? `#${orderId.slice(0, 8).toUpperCase()}` : '—';
+      document.getElementById('trackingQr').src = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=10&data=${encodeURIComponent(trackUrl.href)}`;
     </script>
   </body>
 </html>

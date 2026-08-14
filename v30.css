@@ -1,0 +1,96 @@
+/* StockPilot v30 — compact structure / no-overflow pass */
+:root{--content-max:1480px}
+
+/* Full-width page chrome, tighter page gutters */
+.topbar,.top{width:100%!important;max-width:none!important;padding-left:clamp(16px,2vw,28px)!important;padding-right:clamp(16px,2vw,28px)!important}
+.app-main> :not(.topbar):not(.top),
+#content,.customer-orders,.inventory-grid,.profile-layout,.cargo-layout,.tabs,.inventory-stats,.stats,.inventory-toolbar{
+  width:min(var(--content-max),calc(100% - 28px))!important;
+}
+.heading,.page-title{padding:22px 0 14px!important}
+.heading h1,.page-title h1{font-size:clamp(26px,2.15vw,34px)!important}
+.heading p,.page-title p{font-size:13px!important}
+
+/* More-menu should be a real compact dropdown, never a floating grid */
+.topbar-more{position:relative!important}
+.topbar-more-menu{
+  position:absolute!important;top:calc(100% + 8px)!important;right:0!important;left:auto!important;
+  display:grid!important;grid-template-columns:1fr!important;width:210px!important;max-width:min(210px,calc(100vw - 24px))!important;
+  gap:4px!important;padding:7px!important;border-radius:12px!important;
+}
+.topbar-more-menu .secondary{display:flex!important;width:100%!important;min-height:38px!important;padding:8px 10px!important;border-radius:9px!important;font-size:12px!important;white-space:normal!important}
+
+/* Operations hub becomes a compact status rail */
+.operations-hub{display:block!important;margin:0 auto 12px!important}
+.ops-compact{
+  display:grid;grid-template-columns:auto minmax(0,1fr);gap:14px;align-items:center;
+  padding:10px 12px;border:1px solid rgba(198,217,44,.14);border-radius:14px;
+  background:linear-gradient(180deg,rgba(198,217,44,.045),rgba(255,255,255,.014));
+}
+.ops-compact-title{display:flex;align-items:center;gap:8px;white-space:nowrap}
+.ops-compact-title b{font-size:13px}.ops-compact-title small{color:#7f8c78;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.8px}
+.ops-statuses{display:flex;align-items:center;gap:7px;min-width:0;flex-wrap:wrap}
+.ops-status{
+  display:inline-flex;align-items:center;gap:7px;min-height:36px;padding:0 10px;border:1px solid rgba(255,255,255,.06);
+  border-radius:10px;background:rgba(255,255,255,.025);color:#d8e1d2;text-decoration:none;font-size:12px;font-weight:800;
+}
+.ops-status i{width:9px;height:9px;border-radius:50%;background:#87927f;box-shadow:0 0 0 3px rgba(135,146,127,.08)}
+.ops-status b{font-size:13px;color:#f2f5ed}.ops-status.is-new i{background:#6da7ff}.ops-status.is-risk i{background:#ff7f8d}.ops-status.is-active i{background:#f3c05c}.ops-status.is-ok i{background:#98c75e}
+.ops-status.is-risk b{color:#ffadb6}
+.ops-priority{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
+.ops-priority a{display:inline-flex;align-items:center;min-height:32px;padding:0 9px;border-radius:9px;background:rgba(198,217,44,.09);color:var(--lime);text-decoration:none;font-size:11px;font-weight:900}
+
+/* Personal order workspace: no tall empty left rail and no horizontal table scroll */
+.workspace{grid-template-columns:minmax(230px,270px) minmax(0,1fr)!important;gap:10px!important;align-items:start!important}
+.workspace>.box{min-height:0!important}
+.workspace .form{padding:12px!important}
+.workspace .disclosure{min-height:0!important;align-self:start!important}
+.tablebox{min-height:0!important;overflow:hidden!important}
+.scroll{max-height:540px!important;overflow-y:auto!important;overflow-x:hidden!important}
+.items{width:100%!important;min-width:0!important;table-layout:fixed!important}
+.items th,.items td{padding:9px 8px!important;white-space:normal!important;vertical-align:middle!important}
+.items th{font-size:10px!important;letter-spacing:.04em!important}
+.items th:nth-child(1),.items td:nth-child(1){width:54px}
+.items th:nth-child(2),.items td:nth-child(2){width:auto}
+.items th:nth-child(3),.items td:nth-child(3){width:76px}
+.items th:nth-child(4),.items td:nth-child(4){width:100px}
+.items th:nth-child(5),.items td:nth-child(5){width:90px}
+.items th:nth-child(6),.items td:nth-child(6){width:90px}
+.items th:nth-child(7),.items td:nth-child(7){width:178px}
+.product-cell{min-width:0}
+.product-cell .product-link{display:block;max-width:100%;text-align:left}
+.product-cell .product-link b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.product-subline{display:flex;align-items:center;gap:7px;margin-top:4px;min-width:0}
+.product-subline small{color:#87937f;font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row-status{display:inline-grid;place-items:center;width:18px;height:18px;flex:0 0 18px;border-radius:50%;border:1px solid rgba(255,255,255,.08);background:#1b2118}
+.row-status i{display:block;width:7px;height:7px;border-radius:50%;background:#93a08b}.row-status.low i{background:#ffb348}.row-status.sold i{background:#77c96f}.row-status.ok i{background:#a9c84d}
+.table-actions{display:flex;gap:5px;justify-content:flex-end;align-items:center;flex-wrap:wrap}
+.table-actions button,.table-sale{min-height:32px!important;padding:0 8px!important;border-radius:8px!important;font-size:11px!important}
+.table-sale{background:rgba(198,217,44,.12)!important;color:var(--lime)!important}
+.metrics{margin-top:12px!important}
+
+/* Inventory cards keep actions close and compact */
+.stock-health{padding:0!important;min-height:18px!important;width:18px!important;height:18px!important;overflow:hidden!important;color:transparent!important;border-radius:50%!important;position:relative}
+.stock-health:after{content:"";position:absolute;inset:5px;border-radius:50%;background:currentColor}
+.stock-health.critical{color:#ff7f8d!important;background:rgba(255,127,141,.12)!important}.stock-health.low{color:#ffbd59!important;background:rgba(255,189,89,.12)!important}.stock-health.healthy{color:#a7cc55!important;background:rgba(167,204,85,.12)!important}
+.stock-copy>small{display:inline-block;margin-left:5px}
+.stock-card{min-height:92px!important;padding:11px 12px!important;grid-template-columns:60px minmax(0,1fr) auto!important}
+.stock-photo{width:60px!important;height:60px!important}
+.stock-copy h3{font-size:14px!important}.stock-copy p{font-size:11px!important}
+.stock-actions{gap:6px!important}.stock-actions button{min-height:38px!important}.qty-stepper button{width:38px!important;height:38px!important}
+
+@media(max-width:1100px){
+  .workspace{grid-template-columns:1fr!important}.workspace .form{width:100%!important}
+  .items th:nth-child(4),.items td:nth-child(4){display:none}
+  .ops-compact{grid-template-columns:1fr}.ops-compact-title{justify-content:space-between}
+}
+@media(max-width:760px){
+  .app-main> :not(.topbar):not(.top),#content,.customer-orders,.inventory-grid,.profile-layout,.cargo-layout,.tabs,.inventory-stats,.stats,.inventory-toolbar{width:calc(100% - 16px)!important}
+  .topbar,.top{padding-inline:8px!important}
+  .heading,.page-title{padding:16px 0 10px!important}.heading h1,.page-title h1{font-size:26px!important}
+  .ops-compact{padding:9px!important;gap:8px}.ops-compact-title small{display:none}.ops-statuses{display:grid;grid-template-columns:1fr 1fr;width:100%}.ops-status{justify-content:flex-start;min-width:0}.ops-priority{grid-column:1/-1;margin-left:0}
+  .workspace{gap:8px!important}.scroll{max-height:none!important;overflow:visible!important}
+  .items,.items tbody,.items tr,.items td{display:block;width:100%!important}
+  .items thead{display:none}.items tr{padding:10px;border-bottom:1px solid var(--line)}.items td{display:none!important;padding:0!important;border:0!important}.items td:nth-child(2),.items td:nth-child(3),.items td:nth-child(6),.items td:nth-child(7){display:block!important}.items td:nth-child(3),.items td:nth-child(6){margin-top:7px}.items td:nth-child(7){margin-top:8px}.table-actions{justify-content:flex-start}
+  .stock-card{grid-template-columns:52px minmax(0,1fr)!important}.stock-photo{width:52px!important;height:52px!important}.stock-actions{grid-column:1/-1!important}
+}

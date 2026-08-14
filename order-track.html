@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="az">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#080b07" />
+    <meta name="description" content="StockPilot sifariş izləmə" />
+    <link rel="icon" type="image/png" href="stockpilot-192.png" />
+    <title>Sifarişi izlə — StockPilot</title>
+    <link rel="stylesheet" href="store.css" />
+    <link rel="stylesheet" href="store-success.css" />
+  </head>
+  <body>
+    <header class="track-header">
+      <img src="stockpilot-logo.png" alt="StockPilot" />
+      <a id="backStore" href="store.html">Mağazaya qayıt</a>
+    </header>
+
+    <main class="track-wrap">
+      <section class="track-hero">
+        <div>
+          <p class="eyebrow">SİFARİŞ İZLƏMƏ</p>
+          <h1 id="trackTitle">Sifariş yüklənir…</h1>
+          <p id="trackMeta" class="track-meta"></p>
+        </div>
+        <div id="statusBadge" class="status-badge status-new">Yeni</div>
+      </section>
+
+      <section class="status-panel" aria-label="Sifariş statusu">
+        <div id="statusSteps" class="status-steps"></div>
+      </section>
+
+      <section class="track-content">
+        <div class="track-products-card">
+          <div class="track-section-head">
+            <h2>Məhsullar</h2>
+            <span id="trackCount">0 məhsul</span>
+          </div>
+          <div id="trackProducts" class="track-products"></div>
+        </div>
+
+        <aside class="track-summary-card">
+          <h2>Sifariş məlumatı</h2>
+          <dl>
+            <div><dt>Sifariş kodu</dt><dd id="summaryCode">—</dd></div>
+            <div><dt>Çatdırılma vaxtı</dt><dd id="summaryTime">—</dd></div>
+            <div><dt>Çatdırılma</dt><dd id="summaryDelivery">—</dd></div>
+            <div><dt>Ümumi məbləğ</dt><dd id="summaryTotal">—</dd></div>
+          </dl>
+        </aside>
+      </section>
+
+      <section id="trackError" class="track-error hidden" role="alert"></section>
+    </main>
+
+    <script src="order-track.js"></script>
+  </body>
+</html>
