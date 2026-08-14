@@ -7,19 +7,13 @@
     <meta name="description" content="StockPilot onlayn mağaza kataloqu" />
     <link rel="icon" type="image/png" href="stockpilot-192.png" />
     <title>Mağaza — StockPilot</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
     <link rel="stylesheet" href="store.css" />
   </head>
   <body>
     <header class="store-header">
-      <a href="index.html" aria-label="StockPilot ana səhifə" class="brand-link">
-        <img src="stockpilot-logo.png" alt="StockPilot" class="store-logo" />
-      </a>
-      <div class="header-actions">
-        <button id="cartButton" class="cart-button" aria-controls="cart" aria-expanded="false">
-          <span>Səbət</span>
-          <b id="cartCount">0</b>
-        </button>
-      </div>
+      <a href="index.html" aria-label="StockPilot ana səhifə" class="brand-link"><img src="stockpilot-logo.png" alt="StockPilot" class="store-logo" /></a>
+      <div class="header-actions"><button id="cartButton" class="cart-button" aria-controls="cart" aria-expanded="false"><span>Səbət</span><b id="cartCount">0</b></button></div>
     </header>
 
     <main class="store-main">
@@ -27,8 +21,7 @@
         <div class="hero-copy">
           <p id="shopTag" class="eyebrow">ONLAYN MAĞAZA</p>
           <h1 id="shopName">Mağaza yüklənir…</h1>
-          <p class="hero-text">Məhsulları seçin, səbətə əlavə edin və sifarişi bir neçə sadə addımla tamamlayın.</p>
-
+          <p class="hero-text">Məhsulları seçin, səbətə əlavə edin və sifarişi rahat şəkildə tamamlayın.</p>
         </div>
         <aside class="hero-panel store-filter-panel" aria-label="Məhsul filtrləri">
           <div class="filter-panel-head"><div><small>KATALOQ</small><b>Məhsulu tap</b></div><span id="productCount" class="results-pill">0 məhsul</span></div>
@@ -37,10 +30,7 @@
             <input id="productSearch" type="search" placeholder="Məhsul adı ilə axtar..." autocomplete="off" />
           </label>
           <div><span class="filter-label">Kateqoriya</span><div id="categories" class="categories" aria-label="Məhsul kateqoriyaları"></div></div>
-          <div class="store-filter-grid">
-            <label><span class="filter-label">Stok</span><select id="stockFilter"><option value="all">Hamısı</option><option value="available">Stokda olanlar</option><option value="low">Az qalanlar</option></select></label>
-            <label><span class="filter-label">Sırala</span><select id="productSort"><option value="default">Standart</option><option value="name">Ada görə</option><option value="priceAsc">Qiymət: aşağıdan</option><option value="priceDesc">Qiymət: yuxarıdan</option></select></label>
-          </div>
+          <label class="filter-select"><span class="filter-label">Sırala</span><select id="productSort"><option value="default">Standart</option><option value="name">Ada görə</option><option value="priceAsc">Qiymət: aşağıdan</option><option value="priceDesc">Qiymət: yuxarıdan</option></select></label>
         </aside>
       </section>
       <section id="products" class="products" aria-live="polite"></section>
@@ -48,107 +38,68 @@
 
     <div id="cartBackdrop" class="cart-backdrop hidden"></div>
     <aside id="cart" class="cart hidden" aria-label="Səbət" aria-hidden="true">
-      <header class="cart-head">
-        <div>
-          <p class="eyebrow">CHECKOUT</p>
-          <b>Sifarişi tamamla</b>
-        </div>
-        <button id="closeCart" aria-label="Səbəti bağla">×</button>
-      </header>
-
+      <header class="cart-head"><div><p class="eyebrow">CHECKOUT</p><b>Sifarişi tamamla</b></div><button id="closeCart" aria-label="Səbəti bağla">×</button></header>
       <section class="cart-summary" aria-label="Səbət xülasəsi">
-        <div>
-          <span>Məhsul sayı</span>
-          <b id="cartItemsSummary">0 məhsul</b>
-        </div>
-        <div>
-          <span>Cəmi</span>
-          <b id="cartTotalSummary">0.00 ₼</b>
-        </div>
+        <div><span>Məhsullar</span><b id="cartItemsSummary">0 məhsul</b></div>
+        <div><span>Məhsul cəmi</span><b id="cartSubtotalSummary">0.00 ₼</b></div>
+        <div id="deliverySummaryBox" class="hidden"><span>Çatdırılma</span><b id="deliveryFeeSummary">0.00 ₼</b></div>
+        <div><span>Yekun</span><b id="cartTotalSummary">0.00 ₼</b></div>
       </section>
-
       <div id="cartLines"></div>
 
       <form id="checkout">
         <section class="checkout-section">
-          <div class="section-head">
-            <h2>1. Əlaqə məlumatı</h2>
-            <p>Qısa və rahat doldur.</p>
-          </div>
+          <div class="section-head"><h2>1. Əlaqə məlumatı</h2></div>
           <div class="checkout-grid checkout-grid-two">
-            <label class="checkout-field wide">
-              <span>Ad və soyad</span>
-              <input name="name" autocomplete="name" required />
-            </label>
-            <label class="checkout-field wide">
-              <span>Telefon nömrəsi</span>
-              <input name="phone" inputmode="tel" autocomplete="tel" placeholder="050 000 00 00" required />
-            </label>
+            <label class="checkout-field wide"><span>Ad və soyad</span><input name="name" autocomplete="name" required /></label>
+            <label class="checkout-field wide"><span>Telefon nömrəsi</span><input name="phone" inputmode="tel" autocomplete="tel" placeholder="050 000 00 00" required /></label>
           </div>
-          <label class="checkout-field">
-            <span>Əlavə qeyd <small>istəyə bağlı</small></span>
-            <textarea name="note" placeholder="Məsələn: zəng etmədən əvvəl mesaj yazın"></textarea>
-          </label>
+          <label class="checkout-field"><span>Əlavə qeyd <small>istəyə bağlı</small></span><textarea name="note" placeholder="Məsələn: zəng etmədən əvvəl mesaj yazın"></textarea></label>
         </section>
 
         <section class="checkout-section">
           <div class="section-head"><h2>2. Çatdırılma vaxtı</h2></div>
           <div class="checkout-grid checkout-grid-two compact-top">
-            <label class="checkout-field">
-              <span>Tarix</span>
-              <input id="preferredDate" name="preferredDate" type="date" required />
-            </label>
-            <label class="checkout-field">
-              <span>Saat <small>24 saat formatı</small></span>
-              <select id="preferredTime" name="preferredTime" required></select>
-            </label>
+            <label class="checkout-field"><span>Tarix</span><input id="preferredDate" name="preferredDate" type="date" required /></label>
+            <label class="checkout-field"><span>Saat</span><select id="preferredTime" name="preferredTime" required></select></label>
           </div>
-
         </section>
 
-        <section class="checkout-section">
+        <section class="checkout-section delivery-section">
           <div class="section-head"><h2>3. Çatdırılma və ödəniş</h2></div>
-
           <fieldset class="option-group">
             <legend>Çatdırılma üsulu</legend>
             <div class="option-grid">
-              <label class="option-card">
-                <input type="radio" name="delivery" value="metro" checked />
-                <span class="option-title">Metroda təhvil</span>
-                <small>Qısa və rahat təhvil.</small>
-              </label>
-              <label class="option-card">
-                <input type="radio" name="delivery" value="address" />
-                <span class="option-title">Ünvana çatdırılma</span>
-                <small>Sifarişi ünvana gətirək.</small>
-              </label>
+              <label class="option-card"><input type="radio" name="delivery" value="metro" checked /><span class="option-title">Metroda təhvil</span><small>Metro / rayon qeyd edin.</small></label>
+              <label class="option-card"><input type="radio" name="delivery" value="address" /><span class="option-title">Taksi ilə ünvana</span><small>Konumu xəritədən seçin.</small></label>
             </div>
           </fieldset>
 
-          <div class="checkout-grid compact-top">
-            <label id="metroField" class="checkout-field">
-              <span>Metro / rayon</span>
-              <input name="metro" autocomplete="address-level2" placeholder="Məsələn: 28 May" />
-            </label>
-            <label id="addressField" class="checkout-field hidden">
-              <span>Tam ünvan</span>
-              <input name="address" autocomplete="street-address" placeholder="Küçə, bina, mərtəbə, mənzil" />
-            </label>
+          <div id="metroField" class="compact-top"><label class="checkout-field"><span>Metro / rayon</span><input name="metro" autocomplete="address-level2" placeholder="Məsələn: 28 May" /></label></div>
+
+          <div id="addressDeliveryPanel" class="address-delivery-panel hidden">
+            <div class="map-toolbar">
+              <div><b>Çatdırılma konumu</b><small>Xəritədə nöqtəyə toxunun və ya cari konumu seçin.</small></div>
+              <button id="useMyLocation" type="button" class="secondary-map">Cari konumum</button>
+            </div>
+            <div id="deliveryMap" class="delivery-map" aria-label="Çatdırılma xəritəsi"></div>
+            <div class="map-details">
+              <label class="checkout-field"><span>Ünvan qeydi</span><input id="addressInput" name="address" autocomplete="street-address" placeholder="Küçə, bina, mərtəbə, mənzil" /></label>
+              <div class="delivery-quote" aria-live="polite">
+                <span id="deliveryDistance">Konum seçilməyib</span>
+                <strong id="deliveryQuote">—</strong>
+                <small>Çatdırılma haqqı</small>
+              </div>
+            </div>
+            <input id="deliveryLat" name="deliveryLat" type="hidden" />
+            <input id="deliveryLng" name="deliveryLng" type="hidden" />
           </div>
 
           <fieldset class="option-group compact-top">
             <legend>Ödəniş üsulu</legend>
             <div class="option-grid">
-              <label class="option-card">
-                <input type="radio" name="payment" value="cash" checked />
-                <span class="option-title">Nağd ödəniş</span>
-                <small>Çatdırılmada nağd ver.</small>
-              </label>
-              <label class="option-card">
-                <input type="radio" name="payment" value="card" />
-                <span class="option-title">Kartla ödəniş</span>
-                <small>Çatdırılma zamanı kartla ödə.</small>
-              </label>
+              <label class="option-card"><input type="radio" name="payment" value="cash" checked /><span class="option-title">Nağd ödəniş</span><small>Çatdırılmada nağd.</small></label>
+              <label class="option-card"><input type="radio" name="payment" value="card" /><span class="option-title">Kartla ödəniş</span><small>Çatdırılmada kartla.</small></label>
             </div>
           </fieldset>
         </section>
@@ -159,6 +110,7 @@
     </aside>
 
     <div id="toast" class="store-toast" role="status" aria-live="polite"></div>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
     <script src="store.js"></script>
   </body>
 </html>

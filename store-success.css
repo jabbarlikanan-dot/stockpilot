@@ -69,3 +69,10 @@
   .status-step::after { left:7px; top:22px; bottom:-10px; width:2px; height:auto; right:auto; }
   .track-header,.track-wrap { width:calc(100% - 24px); }
 }
+
+/* v33 — tracking status geometry + share */
+.track-hero-actions{display:flex;align-items:center;justify-content:flex-end;gap:8px;flex-wrap:wrap}.track-share,.track-copy{min-height:40px;padding:0 13px;border:1px solid #303a29;border-radius:11px;background:#161d13;color:#e9efe4;font-weight:800;cursor:pointer}.track-share{background:#c6d92c;color:#10150b;border-color:#c6d92c}.track-copy:hover{border-color:#c6d92c}
+.status-panel{padding:14px 18px!important}.status-steps{align-items:start!important;gap:0!important}.status-step{display:grid!important;grid-template-rows:18px auto!important;justify-items:start!important;gap:7px!important;padding-right:12px!important}.status-step::after{left:18px!important;right:0!important;top:7px!important;height:2px!important;z-index:0!important}.status-step small{position:relative;z-index:2;display:block!important;padding-right:5px;background:#10150d;line-height:1.15!important;white-space:nowrap}.status-dot{z-index:2!important}
+@media(max-width:760px){.track-hero-actions{justify-content:flex-start}.status-steps{grid-template-columns:repeat(5,minmax(74px,1fr))!important;overflow-x:auto!important;padding-bottom:4px!important}.status-step{min-width:74px!important}.status-step::after{left:18px!important;right:0!important;top:7px!important;width:auto!important;height:2px!important;bottom:auto!important}.status-step small{font-size:10px!important;white-space:normal!important}}
+.track-header{width:100%!important;max-width:none!important;margin:0!important;padding-left:max(24px,calc((100vw - 1180px)/2))!important;padding-right:max(24px,calc((100vw - 1180px)/2))!important}
+@media(max-width:760px){.track-header{width:100%!important;padding-left:12px!important;padding-right:12px!important}}

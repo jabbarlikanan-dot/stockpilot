@@ -13,10 +13,18 @@
     if (item) item.read = true;
   }
 
+  function previewTitle(item) {
+    const status = String(item.title || "").replace(/^Sifariş statusu:\s*/i, "").trim();
+    if (item.kind === "order-status" && status) return `Sifariş · ${status}`;
+    if (item.kind === "customer-order") return "Yeni müştəri sifarişi";
+    return item.title || "Bildiriş";
+  }
   function card(item, preview = false) {
+    const title = preview ? previewTitle(item) : item.title;
+    const body = preview ? String(item.body || sender(item)).replace(/\s+/g, " ").trim() : item.body;
     return `<article class="notification-item ${item.read ? "" : "unread"}" data-note-id="${esc(item.id)}" tabindex="0" role="link">
-      <div class="notification-item-top"><b>${esc(item.title)}</b>${item.read ? "" : '<span class="notification-new">Yeni</span>'}</div>
-      <small>${esc(item.body)}<br><span>${esc(sender(item))}</span><br><time>${formatDate(item.createdAt)}</time></small>
+      <div class="notification-item-top"><b>${esc(title)}</b>${item.read ? "" : '<span class="notification-new">Yeni</span>'}</div>
+      <small>${esc(body)}${preview ? ` · <time>${formatDate(item.createdAt)}</time>` : `<br><span>${esc(sender(item))}</span><br><time>${formatDate(item.createdAt)}</time>`}</small>
       ${preview ? "" : `<a class="notification-open" href="${targetFor(item)}">${item.kind === "customer-order" ? "Müştəri sifarişinə keç →" : "Bildirişə bax →"}</a>`}
     </article>`;
   }
@@ -55,7 +63,11 @@
     const badge = document.getElementById("notificationBadge");
     if (badge) { badge.textContent = unread > 99 ? "99+" : unread; badge.classList.toggle("hidden", !unread); }
     const preview = document.getElementById("notificationPreview");
-    if (preview) { preview.innerHTML = list.slice(0, 5).map((item) => card(item, true)).join("") || '<p class="notification-empty">Yeni bildiriş yoxdur.</p>'; bindItems(preview); }
+    if (preview) {
+      const unreadItems = list.filter((item) => !item.read).slice(0, 6);
+      preview.innerHTML = unreadItems.map((item) => card(item, true)).join("") || '<p class="notification-empty">Yeni bildiriş yoxdur.</p>';
+      bindItems(preview);
+    }
     renderPage();
   }
 

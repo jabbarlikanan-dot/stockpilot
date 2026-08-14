@@ -23,7 +23,7 @@
           <h1 id="trackTitle">Sifariş yüklənir…</h1>
           <p id="trackMeta" class="track-meta"></p>
         </div>
-        <div id="statusBadge" class="status-badge status-new">Yeni</div>
+        <div class="track-hero-actions"><button id="shareOrder" class="track-share" type="button">Paylaş</button><button id="copyTrackLink" class="track-copy" type="button" aria-label="İzləmə linkini kopyala">Linki kopyala</button><div id="statusBadge" class="status-badge status-new">Yeni</div></div>
       </section>
 
       <section class="status-panel" aria-label="Sifariş statusu">
@@ -45,6 +45,8 @@
             <div><dt>Sifariş kodu</dt><dd id="summaryCode">—</dd></div>
             <div><dt>Çatdırılma vaxtı</dt><dd id="summaryTime">—</dd></div>
             <div><dt>Çatdırılma</dt><dd id="summaryDelivery">—</dd></div>
+            <div><dt>Məhsullar</dt><dd id="summarySubtotal">—</dd></div>
+            <div id="summaryDeliveryFeeRow" class="hidden"><dt>Çatdırılma haqqı</dt><dd id="summaryDeliveryFee">—</dd></div>
             <div><dt>Ümumi məbləğ</dt><dd id="summaryTotal">—</dd></div>
           </dl>
         </aside>

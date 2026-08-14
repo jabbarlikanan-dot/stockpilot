@@ -12,6 +12,12 @@ const api = (path, options = {}) =>
 function message(form, text) {
   form.querySelector(".msg").textContent = text;
 }
+function sizeActiveForm() {
+  const wrap = document.querySelector(".form-wrap");
+  const active = document.querySelector(".form.active");
+  if (!wrap || !active) return;
+  requestAnimationFrame(() => { wrap.style.minHeight = `${Math.ceil(active.scrollHeight)}px`; });
+}
 function setupSwitcher() {
   document.querySelectorAll("[data-form]").forEach((button) => {
     button.onclick = () => {
@@ -26,8 +32,11 @@ function setupSwitcher() {
             item.id === `${button.dataset.form}Form`,
           ),
         );
+      sizeActiveForm();
     };
   });
+  sizeActiveForm();
+  addEventListener("resize", sizeActiveForm);
 }
 async function readResponse(response) {
   try {

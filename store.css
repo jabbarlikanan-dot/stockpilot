@@ -642,3 +642,29 @@ body.cart-open { overflow:hidden; }
 @media(max-width:900px){.hero{grid-template-columns:1fr!important}.store-filter-grid{grid-template-columns:1fr 1fr}}
 @media(max-width:600px){.store-main{width:calc(100% - 16px)!important}.store-header{padding-inline:10px!important}.hero-copy{padding:18px!important}.hero h1{font-size:34px!important}.store-filter-panel{padding:12px!important}.store-filter-grid{grid-template-columns:1fr}.products{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px!important}.product{min-height:270px!important}}
 @media(max-width:390px){.products{grid-template-columns:1fr!important}}
+
+/* v33 — wider product cards, map delivery checkout and full-width headers */
+.store-header{width:100%!important;max-width:none!important;margin:0!important;padding-left:max(24px,calc((100vw - 1240px)/2))!important;padding-right:max(24px,calc((100vw - 1240px)/2))!important;border-bottom:1px solid rgba(255,255,255,.07)!important}
+.store-main{width:min(1240px,calc(100% - 28px))!important}
+.hero{grid-template-columns:minmax(0,1.35fr) minmax(360px,.65fr)!important}
+.store-filter-panel{min-width:0!important}
+.filter-select{display:grid;gap:6px}.filter-select select{width:100%;min-height:42px;padding:0 11px;border:1px solid rgba(255,255,255,.08);border-radius:12px;background:#171d14;color:var(--text);font-weight:700}
+.products{grid-template-columns:repeat(auto-fit,minmax(270px,320px))!important;justify-content:start!important;gap:14px!important}
+.product{min-width:0!important;min-height:350px!important}
+.product h2{font-size:16px!important;line-height:1.28!important;min-height:41px!important}
+.product footer{display:grid!important;grid-template-columns:auto minmax(118px,1fr)!important;align-items:center!important;gap:12px!important}
+.product footer .price{white-space:nowrap!important;font-size:19px!important;line-height:1!important}
+.product footer button{width:100%!important;min-width:0!important;white-space:normal!important;line-height:1.15!important;padding-inline:12px!important}
+.cart{width:min(540px,100vw)!important;transition:width .2s ease!important}
+.cart.cart-wide{width:min(880px,100vw)!important}
+.cart-summary{grid-template-columns:repeat(2,minmax(0,1fr))!important}
+.address-delivery-panel{display:grid;gap:12px;margin-top:12px;padding:12px;border:1px solid rgba(198,217,44,.2);border-radius:16px;background:rgba(198,217,44,.035)}
+.map-toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px}.map-toolbar>div{display:grid;gap:3px}.map-toolbar b{font-size:14px}.map-toolbar small{color:#93a08b;font-size:11px}
+.secondary-map{min-height:38px;padding:0 12px;border-radius:10px;border:1px solid rgba(255,255,255,.09);background:#1a2116;color:#e8eee3;font-weight:800}
+.delivery-map{height:310px;border-radius:14px;overflow:hidden;border:1px solid rgba(255,255,255,.08);background:#10150d;z-index:0}
+.map-details{display:grid;grid-template-columns:minmax(0,1fr) 210px;gap:12px;align-items:stretch}
+.delivery-quote{display:grid;align-content:center;gap:2px;padding:12px 14px;border:1px solid rgba(255,255,255,.08);border-radius:14px;background:#151b12;text-align:right}
+.delivery-quote span{color:#9eaa96;font-size:11px;font-weight:700}.delivery-quote strong{font-size:24px;line-height:1.1;color:var(--lime)}.delivery-quote small{color:#7f8b78;font-size:10px;font-weight:800;text-transform:uppercase;letter-spacing:.06em}
+.leaflet-container{font-family:var(--font-ui)!important}
+@media(max-width:900px){.hero{grid-template-columns:1fr!important}.products{grid-template-columns:repeat(auto-fit,minmax(250px,1fr))!important}.cart.cart-wide{width:min(720px,100vw)!important}}
+@media(max-width:600px){.store-header{padding-left:12px!important;padding-right:12px!important}.store-main{width:calc(100% - 16px)!important}.products{grid-template-columns:1fr!important}.product{min-height:0!important}.product footer{grid-template-columns:1fr!important}.product footer .price{font-size:21px!important}.map-toolbar{align-items:flex-start;flex-direction:column}.secondary-map{width:100%}.delivery-map{height:280px}.map-details{grid-template-columns:1fr}.delivery-quote{text-align:left}.cart-summary{grid-template-columns:1fr 1fr!important}}

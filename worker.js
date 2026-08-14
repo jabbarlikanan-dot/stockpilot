@@ -101,7 +101,7 @@ const productList = (state, reserved = {}) =>
         image: item.img || "",
         orderId: order.id,
         index,
-        sold: Boolean(item.sold) || physical <= 0,
+        sold: Boolean(item.sold),
       };
     }),
   );
@@ -120,6 +120,89 @@ async function reservedStock(e, ownerId) {
   }
   return reserved;
 }
+
+const defaultStoreSettings = {
+  originLat: 40.4093,
+  originLng: 49.8671,
+  originLabel: "Bakı mərkəz",
+  baseFee: 2.5,
+  perKm: 0.75,
+  minFee: 3.5,
+  morningMultiplier: 1.15,
+  eveningMultiplier: 1.25,
+  nightMultiplier: 1.20,
+  weekendMultiplier: 1.10,
+};
+let storeSettingsSchemaReady;
+function ensureStoreSettings(e) {
+  if (!storeSettingsSchemaReady) {
+    storeSettingsSchemaReady = e.DB.prepare(`CREATE TABLE IF NOT EXISTS store_settings (
+      owner_user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      origin_lat REAL NOT NULL DEFAULT 40.4093,
+      origin_lng REAL NOT NULL DEFAULT 49.8671,
+      origin_label TEXT NOT NULL DEFAULT 'Bakı mərkəz',
+      base_fee REAL NOT NULL DEFAULT 2.5,
+      per_km REAL NOT NULL DEFAULT 0.75,
+      min_fee REAL NOT NULL DEFAULT 3.5,
+      morning_multiplier REAL NOT NULL DEFAULT 1.15,
+      evening_multiplier REAL NOT NULL DEFAULT 1.25,
+      night_multiplier REAL NOT NULL DEFAULT 1.20,
+      weekend_multiplier REAL NOT NULL DEFAULT 1.10,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )`).run();
+  }
+  return storeSettingsSchemaReady;
+}
+async function readStoreSettings(e, ownerId) {
+  await ensureStoreSettings(e);
+  const row = await e.DB.prepare("SELECT * FROM store_settings WHERE owner_user_id=?").bind(ownerId).first();
+  if (!row) return { ...defaultStoreSettings };
+  return {
+    originLat: Number(row.origin_lat), originLng: Number(row.origin_lng), originLabel: row.origin_label || "Mağaza",
+    baseFee: Number(row.base_fee), perKm: Number(row.per_km), minFee: Number(row.min_fee),
+    morningMultiplier: Number(row.morning_multiplier), eveningMultiplier: Number(row.evening_multiplier),
+    nightMultiplier: Number(row.night_multiplier), weekendMultiplier: Number(row.weekend_multiplier),
+  };
+}
+const clampNum = (value, min, max, fallback) => {
+  const n = Number(value);
+  return Number.isFinite(n) ? Math.min(max, Math.max(min, n)) : fallback;
+};
+function haversineKm(aLat, aLng, bLat, bLng) {
+  const rad = (d) => d * Math.PI / 180, R = 6371;
+  const dLat = rad(bLat - aLat), dLng = rad(bLng - aLng);
+  const q = Math.sin(dLat/2) ** 2 + Math.cos(rad(aLat)) * Math.cos(rad(bLat)) * Math.sin(dLng/2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(q));
+}
+async function roadDistanceKm(settings, lat, lng) {
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/${settings.originLng},${settings.originLat};${lng},${lat}?overview=false&alternatives=false&steps=false`;
+    const response = await fetch(url, { headers: { "user-agent": "StockPilot/1.0" } });
+    const data = await response.json();
+    const meters = Number(data?.routes?.[0]?.distance);
+    if (response.ok && Number.isFinite(meters) && meters > 0) return meters / 1000;
+  } catch {}
+  return haversineKm(settings.originLat, settings.originLng, lat, lng) * 1.22;
+}
+function tariffForTime(settings, preferredAt) {
+  const hour = Number(String(preferredAt || "").slice(11,13));
+  const date = new Date(`${String(preferredAt || "").slice(0,10)}T12:00:00Z`);
+  const weekend = [0,6].includes(date.getUTCDay());
+  let multiplier = 1, periodLabel = "Standart tarif";
+  if (hour >= 8 && hour < 10) { multiplier *= settings.morningMultiplier; periodLabel = "Səhər pik saatı"; }
+  else if (hour >= 17 && hour < 20) { multiplier *= settings.eveningMultiplier; periodLabel = "Axşam pik saatı"; }
+  else if (hour >= 22 || hour < 6) { multiplier *= settings.nightMultiplier; periodLabel = "Gecə tarifi"; }
+  if (weekend) { multiplier *= settings.weekendMultiplier; periodLabel += " · həftəsonu"; }
+  return { multiplier, periodLabel };
+}
+async function calculateDeliveryQuote(e, ownerId, lat, lng, preferredAt) {
+  const settings = await readStoreSettings(e, ownerId);
+  const distanceKm = await roadDistanceKm(settings, lat, lng);
+  const { multiplier, periodLabel } = tariffForTime(settings, preferredAt);
+  const raw = Math.max(settings.minFee, (settings.baseFee + distanceKm * settings.perKm) * multiplier);
+  return { fee: Math.round(raw * 100) / 100, distanceKm: Math.round(distanceKm * 100) / 100, periodLabel };
+}
+
 const whatsappStatuses = {
   new: "Yeni sifarişiniz qəbul edildi.",
   confirmed: "Sifarişiniz təsdiqləndi.",
@@ -278,7 +361,18 @@ export default {
       const state = await readState(e, owner.id);
       const reserved = await reservedStock(e, owner.id);
       // Kataloq tam görünür; aktiv müştəri sifarişlərində rezerv olunan say mövcud stokdan çıxılır.
-      return json({ shop: { username: owner.username, name: `${owner.first_name} ${owner.last_name}` }, products: productList(state, reserved) });
+      const storeSettings = await readStoreSettings(e, owner.id);
+      return json({ shop: { username: owner.username, name: `${owner.first_name} ${owner.last_name}`, originLabel: storeSettings.originLabel }, products: productList(state, reserved) });
+    }
+    const storeQuoteMatch = p.match(/^\/api\/store\/([\w.-]{3,30})\/delivery-quote$/);
+    if (storeQuoteMatch && r.method === "POST") {
+      const owner = await e.DB.prepare("SELECT id FROM users WHERE username=?").bind(storeQuoteMatch[1]).first();
+      if (!owner) return fail("Mağaza tapılmadı.", 404);
+      const body = await r.json();
+      const lat = Number(body.lat), lng = Number(body.lng), preferredAt = String(body.preferredAt || "");
+      if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) return fail("Çatdırılma konumu düzgün deyil.");
+      if (!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::\d{2})?$/.test(preferredAt)) return fail("Çatdırılma vaxtı düzgün deyil.");
+      return json(await calculateDeliveryQuote(e, owner.id, lat, lng, preferredAt));
     }
     const storeTrackMatch = p.match(/^\/api\/store\/([\w.-]{3,30})\/orders\/([0-9a-fA-F-]{36})$/);
     if (storeTrackMatch && r.method === "GET") {
@@ -294,6 +388,9 @@ export default {
         createdAt: order.createdAt,
         preferredAt: order.customer?.preferredAt || "",
         delivery: order.customer?.delivery || "",
+        subtotal: Number(order.subtotal ?? order.total) || 0,
+        deliveryFee: Number(order.deliveryFee) || 0,
+        deliveryDistanceKm: Number(order.deliveryDistanceKm) || 0,
         total: Number(order.total) || 0,
         cart: (order.cart || []).map((item) => ({
           id: item.id,
@@ -311,19 +408,28 @@ export default {
       const body = await r.json();
       const name = String(body.name || "").trim(), phone = String(body.phone || "").trim();
       if (!name || !phone || !Array.isArray(body.cart) || !body.cart.length) return fail("Ad, telefon və məhsullar tələb olunur.");
-      const reserved = await reservedStock(e, owner.id);
-      const products = productList(await readState(e, owner.id), reserved);
+      const products = productList(await readState(e, owner.id));
       const cart = [];
       for (const line of body.cart) {
-        const product = products.find((x) => String(x.id) === String(line.id) && !x.sold);
+        const product = products.find((x) => String(x.id) === String(line.id));
         const quantity = Math.max(1, Number(line.quantity) || 1);
-        if (!product || quantity > product.quantity) return fail("Məhsul stokda yoxdur.", 409);
+        if (!product) return fail("Məhsul tapılmadı.", 404);
         cart.push({ ...product, quantity });
       }
       const preferredAt = String(body.preferredAt || "").slice(0, 40);
       if (!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::\d{2})?$/.test(preferredAt)) return fail("Çatdırılma tarix və saatını 24 saat formatında yazın.");
       if (preferredAt.slice(0, 10) < new Date().toISOString().slice(0, 10)) return fail("Keçmiş tarix seçilə bilməz.");
-      const order = { id: crypto.randomUUID(), customer: { name, phone, note: String(body.note || "").slice(0, 500), delivery: String(body.delivery || "metro"), metro: String(body.metro || ""), address: String(body.address || ""), payment: String(body.payment || "cash"), preferredAt }, cart, total: cart.reduce((s, x) => s + x.price * x.quantity, 0), createdAt: new Date().toISOString() };
+      const delivery = String(body.delivery || "metro");
+      let deliveryFee = 0, deliveryDistanceKm = 0, deliveryPeriodLabel = "";
+      let deliveryLat = null, deliveryLng = null;
+      if (delivery === "address") {
+        deliveryLat = Number(body.deliveryLat); deliveryLng = Number(body.deliveryLng);
+        if (!Number.isFinite(deliveryLat) || deliveryLat < -90 || deliveryLat > 90 || !Number.isFinite(deliveryLng) || deliveryLng < -180 || deliveryLng > 180) return fail("Çatdırılma konumunu xəritədən seçin.");
+        const quote = await calculateDeliveryQuote(e, owner.id, deliveryLat, deliveryLng, preferredAt);
+        deliveryFee = quote.fee; deliveryDistanceKm = quote.distanceKm; deliveryPeriodLabel = quote.periodLabel;
+      }
+      const subtotal = cart.reduce((s, x) => s + x.price * x.quantity, 0);
+      const order = { id: crypto.randomUUID(), customer: { name, phone, note: String(body.note || "").slice(0, 500), delivery, metro: String(body.metro || ""), address: String(body.address || ""), payment: String(body.payment || "cash"), preferredAt, deliveryLat, deliveryLng }, cart, subtotal, deliveryFee, deliveryDistanceKm, deliveryPeriodLabel, total: subtotal + deliveryFee, createdAt: new Date().toISOString() };
       await e.DB.prepare("INSERT INTO customer_orders(id,owner_user_id,order_json,status) VALUES(?,?,?,?)").bind(order.id, owner.id, JSON.stringify(order), "new").run();
       await notification(e, owner.id, "customer-order", "Yeni müştəri sifarişi", `${name} · ${order.total.toFixed(2)} ₼`, { orderId: order.id });
       return json({ ok: true, orderId: order.id }, 201);
@@ -333,6 +439,25 @@ export default {
       return user
         ? json({ user: pub(user) })
         : fail("Giriş tələb olunur.", 401);
+    if (p === "/api/store-settings") {
+      if (!user) return fail("Giriş tələb olunur.", 401);
+      if (r.method === "GET") return json({ settings: await readStoreSettings(e, user.id) });
+      if (r.method === "PUT") {
+        const body = await r.json();
+        const current = await readStoreSettings(e, user.id);
+        const next = {
+          originLat: clampNum(body.originLat, -90, 90, current.originLat),
+          originLng: clampNum(body.originLng, -180, 180, current.originLng),
+          originLabel: String(body.originLabel || current.originLabel || "Mağaza").trim().slice(0,120),
+          baseFee: clampNum(body.baseFee, 0, 100, current.baseFee), perKm: clampNum(body.perKm, 0, 20, current.perKm), minFee: clampNum(body.minFee, 0, 100, current.minFee),
+          morningMultiplier: clampNum(body.morningMultiplier, 0.5, 3, current.morningMultiplier), eveningMultiplier: clampNum(body.eveningMultiplier, 0.5, 3, current.eveningMultiplier),
+          nightMultiplier: clampNum(body.nightMultiplier, 0.5, 3, current.nightMultiplier), weekendMultiplier: clampNum(body.weekendMultiplier, 0.5, 3, current.weekendMultiplier),
+        };
+        await ensureStoreSettings(e);
+        await e.DB.prepare(`INSERT INTO store_settings(owner_user_id,origin_lat,origin_lng,origin_label,base_fee,per_km,min_fee,morning_multiplier,evening_multiplier,night_multiplier,weekend_multiplier,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP) ON CONFLICT(owner_user_id) DO UPDATE SET origin_lat=excluded.origin_lat,origin_lng=excluded.origin_lng,origin_label=excluded.origin_label,base_fee=excluded.base_fee,per_km=excluded.per_km,min_fee=excluded.min_fee,morning_multiplier=excluded.morning_multiplier,evening_multiplier=excluded.evening_multiplier,night_multiplier=excluded.night_multiplier,weekend_multiplier=excluded.weekend_multiplier,updated_at=CURRENT_TIMESTAMP`).bind(user.id,next.originLat,next.originLng,next.originLabel,next.baseFee,next.perKm,next.minFee,next.morningMultiplier,next.eveningMultiplier,next.nightMultiplier,next.weekendMultiplier).run();
+        return json({ ok:true, settings: next });
+      }
+    }
     if (p === "/api/profile" && r.method === "PUT") {
       if (!user) return fail("Giriş tələb olunur.", 401);
       const body = await r.json();
@@ -466,7 +591,7 @@ export default {
           for (const ownerOrder of state.orders || []) for (let i = 0; i < (ownerOrder.items || []).length; i++) {
             const item = ownerOrder.items[i], itemId = item.id || `${ownerOrder.id}:${i}`;
             if (String(itemId) === String(line.id)) {
-              const deliveredQty = Math.min(Number(item.qty) || 0, Number(line.quantity) || 0);
+              const deliveredQty = Math.max(0, Number(line.quantity) || 0);
               if (!deliveredQty) continue;
               item.acquiredQty = Number(item.acquiredQty ?? item.qty) || 0;
               item.qty = Math.max(0, (Number(item.qty) || 0) - deliveredQty);

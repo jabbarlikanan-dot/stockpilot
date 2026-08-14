@@ -4,3 +4,18 @@ CREATE TABLE IF NOT EXISTS customer_orders (id TEXT PRIMARY KEY, owner_user_id T
 CREATE INDEX IF NOT EXISTS idx_customer_orders_owner ON customer_orders(owner_user_id, created_at DESC);
 CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, kind TEXT NOT NULL DEFAULT 'info', title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', data_json TEXT, is_read INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE INDEX IF NOT EXISTS idx_notifications_owner ON notifications(owner_user_id, is_read, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS store_settings (
+  owner_user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  origin_lat REAL NOT NULL DEFAULT 40.4093,
+  origin_lng REAL NOT NULL DEFAULT 49.8671,
+  origin_label TEXT NOT NULL DEFAULT 'Bakı mərkəz',
+  base_fee REAL NOT NULL DEFAULT 2.5,
+  per_km REAL NOT NULL DEFAULT 0.75,
+  min_fee REAL NOT NULL DEFAULT 3.5,
+  morning_multiplier REAL NOT NULL DEFAULT 1.15,
+  evening_multiplier REAL NOT NULL DEFAULT 1.25,
+  night_multiplier REAL NOT NULL DEFAULT 1.20,
+  weekend_multiplier REAL NOT NULL DEFAULT 1.10,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

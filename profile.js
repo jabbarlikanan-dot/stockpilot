@@ -48,3 +48,32 @@ async function boot() {
   document.getElementById("logout").onclick = logout;
 }
 boot().catch(logout);
+
+async function setupStoreSettings() {
+  const form = document.getElementById("storeSettingsForm");
+  if (!form) return;
+  const message = document.getElementById("storeSettingsMessage");
+  const response = await api("/api/store-settings");
+  const data = await response.json().catch(() => ({}));
+  if (response.ok && data.settings) {
+    for (const [key, value] of Object.entries(data.settings)) if (form.elements[key]) form.elements[key].value = value;
+  }
+  document.getElementById("useStoreLocation").onclick = () => {
+    if (!navigator.geolocation) { message.textContent = "Bu cihazda konum xidməti yoxdur."; return; }
+    message.textContent = "Konum alınır…";
+    navigator.geolocation.getCurrentPosition((position) => {
+      form.originLat.value = position.coords.latitude.toFixed(6);
+      form.originLng.value = position.coords.longitude.toFixed(6);
+      message.textContent = "Cari konum götürüldü. Yadda saxlamağı unutmayın.";
+    }, () => { message.textContent = "Konumu almaq mümkün olmadı."; }, { enableHighAccuracy:true, timeout:9000 });
+  };
+  form.onsubmit = async (event) => {
+    event.preventDefault();
+    message.textContent = "Saxlanılır…";
+    const body = Object.fromEntries(new FormData(form));
+    const save = await api("/api/store-settings", { method:"PUT", headers:{"content-type":"application/json"}, body:JSON.stringify(body) });
+    const saved = await save.json().catch(() => ({}));
+    message.textContent = save.ok ? "Çatdırılma ayarları saxlanıldı." : (saved.error || "Ayarlar saxlanılmadı.");
+  };
+}
+setupStoreSettings().catch(() => {});

@@ -59,8 +59,22 @@ async function boot() {
       </article>`).join("") || '<p class="track-empty">Məhsul məlumatı yoxdur.</p>';
     $("summaryCode").textContent = code;
     $("summaryTime").textContent = formatDateTime(data.preferredAt);
-    $("summaryDelivery").textContent = data.delivery === "address" ? "Ünvana çatdırılma" : "Metroda təhvil";
+    $("summaryDelivery").textContent = data.delivery === "address" ? "Taksi ilə ünvana" : "Metroda təhvil";
+    $("summarySubtotal").textContent = money(data.subtotal ?? data.total);
+    const deliveryFee = Number(data.deliveryFee) || 0;
+    $("summaryDeliveryFeeRow").classList.toggle("hidden", !deliveryFee);
+    $("summaryDeliveryFee").textContent = money(deliveryFee);
     $("summaryTotal").textContent = money(data.total);
+    const shareText = `StockPilot sifariş ${code} · ${statusLabel}`;
+    $("shareOrder").onclick = async () => {
+      try {
+        if (navigator.share) await navigator.share({ title: `Sifariş ${code}`, text: shareText, url: location.href });
+        else { await navigator.clipboard.writeText(location.href); $("shareOrder").textContent = "Link kopyalandı"; setTimeout(() => $("shareOrder").textContent = "Paylaş", 1800); }
+      } catch {}
+    };
+    $("copyTrackLink").onclick = async () => {
+      try { await navigator.clipboard.writeText(location.href); $("copyTrackLink").textContent = "Kopyalandı"; setTimeout(() => $("copyTrackLink").textContent = "Linki kopyala", 1600); } catch {}
+    };
   } catch (error) {
     $("trackTitle").textContent = "Sifariş tapılmadı";
     $("trackError").classList.remove("hidden");
