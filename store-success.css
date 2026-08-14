@@ -1,8 +1,8 @@
-.date-label { color: #a4ae9b; font-size: 12px; font-weight: 700; }
+.date-label { color: #9b9fae; font-size: 12px; font-weight: 700; }
 .date-label input { margin-top: 6px; }
 .success-wrap { min-height: 100dvh; display: grid; place-items: center; padding: 24px; }
-.success-card { width: min(540px, 100%); padding: 34px; border: 1px solid #303a29; border-radius: 22px; background: radial-gradient(circle at top right, rgba(198, 217, 44, .17), transparent 48%), #121710; text-align: center; box-shadow: 0 25px 80px #0007; }
-.success-mark { width: 68px; height: 68px; margin: 0 auto 18px; display: grid; place-items: center; border-radius: 50%; background: #c6d92c; color: #10150b; font-size: 34px; font-weight: 900; }
+.success-card { width: min(540px, 100%); padding: 34px; border: 1px solid #292d3a; border-radius: 22px; background: radial-gradient(circle at top right, rgba(44, 217, 194, .17), transparent 48%), #101217; text-align: center; box-shadow: 0 25px 80px #0007; }
+.success-mark { width: 68px; height: 68px; margin: 0 auto 18px; display: grid; place-items: center; border-radius: 50%; background: #2cd9c2; color: #0b1514; font-size: 34px; font-weight: 900; }
 .success-card h1 { margin: 0; font-size: 30px; }
-.success-card p { color: #a4ae9b; line-height: 1.6; }
-.success-card a { display: inline-block; margin-top: 14px; padding: 12px 16px; border-radius: 10px; background: #c6d92c; color: #10150b; font-weight: 900; text-decoration: none; }
+.success-card p { color: #9b9fae; line-height: 1.6; }
+.success-card a { display: inline-block; margin-top: 14px; padding: 12px 16px; border-radius: 10px; background: #2cd9c2; color: #0b1514; font-weight: 900; text-decoration: none; }

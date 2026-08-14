@@ -27,7 +27,7 @@ function addSale(item, quantity) {
   return true;
 }
 async function save() {
-  await api("/api/state", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(state) });
+  await api("/api/state", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ state }) });
 }
 function render() {
   const search = document.getElementById("search").value.toLowerCase().trim();
@@ -46,7 +46,7 @@ function render() {
       const [orderId, index] = (button.dataset.plus || button.dataset.minus || button.dataset.sold).split(":");
       const item = state.orders.find((order) => order.id === orderId).items[Number(index)];
       if (button.dataset.plus) { item.qty = remaining(item) + 1; item.acquiredQty = acquired(item) + 1; }
-      if (button.dataset.minus) item.qty = Math.max(1, remaining(item) - 1);
+      if (button.dataset.minus) item.qty = Math.max(0, remaining(item) - 1);
       if (button.dataset.sold) { const count = Number(prompt(`Neçə ədəd satıldı? Stokda ${remaining(item)} ədəd var.`, "1")); if (!Number.isFinite(count) || count <= 0) return; if (count > remaining(item)) return alert(`Stokda yalnız ${remaining(item)} ədəd qalıb.`); addSale(item, count); }
       await save(); render();
     };
