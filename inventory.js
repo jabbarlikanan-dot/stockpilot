@@ -1,11 +1,12 @@
-const api = (path, options = {}) => fetch(path, { ...options, credentials: "same-origin", headers: { ...(options.headers || {}) } });
+const token = localStorage.stockpilotToken;
+if (!token) location.href = "index.html";
+const api = (path, options = {}) => fetch(path, { ...options, headers: { Authorization: `Bearer ${token}`, ...(options.headers || {}) } });
 const money = (n) => `${Number(n || 0).toLocaleString("az-AZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₼`;
-const safeImg = (value) => { const src=String(value||"").trim(); return /^data:image\/(?:jpeg|png|webp);base64,[a-z0-9+/=]+$/i.test(src) || /^\/api\/images\/[A-Za-z0-9_./%-]+$/.test(src) && !src.includes("..") ? src : ""; };
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[m]));
 let state = { orders: [] };
 let user;
 let healthFilter = "all";
-const logout = async () => { localStorage.removeItem("stockpilotToken"); try { await fetch("/api/logout", { method:"POST", credentials:"same-origin" }); } catch {} location.href = "index.html"; };
+const logout = () => { localStorage.removeItem("stockpilotToken"); location.href = "index.html"; };
 const toast = (message, type = "info") => window.StockPilotUI?.toast(message, type);
 
 function paintUser() {
@@ -66,7 +67,7 @@ function render() {
   const shown = entries.filter(({ item, order }) => (!search || `${item.name || ""} ${order.name || ""}`.toLowerCase().includes(search)) && (!lowOnly || remaining(item) <= Number(item.minStock || 0)) && (healthFilter === "all" || healthOf(item) === healthFilter));
   document.getElementById("inventory").innerHTML = shown.length ? shown.map(({ order, item, index }) => {
     const isLow = remaining(item) <= Number(item.minStock || 0);
-    const image = safeImg(item.img || item.image || "");
+    const image = item.img || item.image || "";
     const health = healthOf(item);
     const healthLabel = health === "critical" ? "Kritik stok" : health === "low" ? "Az qalıb" : "Sağlam stok";
     return `<article class="card stock-card ${isLow ? "is-low" : ""} health-${health}"><div class="stock-photo">${image ? `<img src="${esc(image)}" alt="${esc(item.name || "Məhsul")}">` : "▦"}</div><div class="stock-copy"><span class="stock-health ${health}">${healthLabel}</span><small>${esc(order.name || "Sifariş")} · ${esc(item.category || "Digər")}</small><h3>${item.favorite ? "★ " : ""}${esc(item.name || "Adsız məhsul")}</h3><p>${isLow ? `⚠ Minimum hədd: ${Number(item.minStock || 0)} ədəd` : `Minimum hədd: ${Number(item.minStock || 0)} ədəd`}</p></div><div class="stock-actions"><div class="qty-stepper"><button data-minus="${esc(order.id)}:${index}" aria-label="Stoku azalt">−</button><b>${remaining(item)}</b><button data-plus="${esc(order.id)}:${index}" aria-label="Stoku artır">+</button></div><button class="secondary" data-sold="${esc(order.id)}:${index}">Satış əlavə et</button></div></article>`;

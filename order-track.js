@@ -3,7 +3,6 @@ const shop = params.get("shop") || "";
 const orderId = params.get("id") || "";
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s || "").replace(/[&<>"']/g, (m) => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#039;" })[m]);
-const safeImg=(value)=>{const src=String(value||'').trim();return /^data:image\/(?:jpeg|png|webp);base64,[a-z0-9+/=]+$/i.test(src)||/^\/api\/images\/[A-Za-z0-9_./%-]+$/.test(src)&&!src.includes('..')?src:''};
 const money = (n) => `${(Number(n) || 0).toLocaleString("az-AZ", { minimumFractionDigits:2, maximumFractionDigits:2 })} ₼`;
 const statusMap = {
   new: "Yeni",
@@ -51,7 +50,7 @@ async function boot() {
     $("trackProducts").innerHTML = cart.map((item) => `
       <article class="track-product">
         <div class="track-product-image">
-          ${safeImg(item.image) ? `<img src="${esc(safeImg(item.image))}" alt="${esc(item.name)}">` : '<span>Şəkil yoxdur</span>'}
+          ${item.image ? `<img src="${esc(item.image)}" alt="${esc(item.name)}">` : '<span>Şəkil yoxdur</span>'}
         </div>
         <div class="track-product-copy">
           <h3>${esc(item.name)}</h3>

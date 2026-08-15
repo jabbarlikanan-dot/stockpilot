@@ -1,9 +1,14 @@
-const request = (path, options = {}) => fetch(path, { ...options, credentials: "same-origin", headers: { ...(options.headers || {}) } });
+const token = localStorage.stockpilotToken;
+if (!token) location.href = "index.html";
+const request = (path, options = {}) =>
+  fetch(path, {
+    ...options,
+    headers: { Authorization: `Bearer ${token}`, ...(options.headers || {}) },
+  });
 let me;
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[m]));
-async function logout() {
+function logout() {
   localStorage.removeItem("stockpilotToken");
-  try { await fetch("/api/logout", { method: "POST", credentials: "same-origin" }); } catch {}
   location.href = "index.html";
 }
 function format(amount) {

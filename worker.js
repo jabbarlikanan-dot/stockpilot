@@ -1,198 +1,70 @@
-const enc = new TextEncoder();
-const SECURITY_HEADERS = {
-  "x-content-type-options": "nosniff",
-  "referrer-policy": "strict-origin-when-cross-origin",
-  "x-frame-options": "DENY",
-  "permissions-policy": "geolocation=(self), camera=(), microphone=(), payment=()",
-  "cross-origin-opener-policy": "same-origin",
-};
-const CSP = [
-  "default-src 'self'",
-  "script-src 'self' https://unpkg.com https://cdn.sheetjs.com",
-  "style-src 'self' 'unsafe-inline' https://unpkg.com",
-  "img-src 'self' data: blob: https://unpkg.com https://*.tile.openstreetmap.org https://api.qrserver.com",
-  "connect-src 'self' https://router.project-osrm.org",
-  "font-src 'self' data:",
-  "object-src 'none'",
-  "base-uri 'self'",
-  "frame-ancestors 'none'",
-  "form-action 'self'",
-  "upgrade-insecure-requests",
-].join('; ');
-const applySecurityHeaders = (headers, { html = false } = {}) => {
-  for (const [key, value] of Object.entries(SECURITY_HEADERS)) headers.set(key, value);
-  if (html) headers.set("content-security-policy", CSP);
-  return headers;
-};
-const json = (x, status = 200, extraHeaders = {}) => {
-  const headers = new Headers({
-    "content-type": "application/json; charset=utf-8",
-    "cache-control": "no-store",
-    ...extraHeaders,
-  });
-  applySecurityHeaders(headers);
-  return new Response(JSON.stringify(x), { status, headers });
-};
-const fail = (message, status = 400, extra = {}) => json({ error: message, ...extra }, status);
-const b64 = (x) => btoa(String.fromCharCode(...new Uint8Array(x)));
-const from64 = (x) => Uint8Array.from(atob(x), (c) => c.charCodeAt(0));
-const b64urlText = (text) => btoa(unescape(encodeURIComponent(text))).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
-const fromB64urlText = (text) => decodeURIComponent(escape(atob(String(text).replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(text.length / 4) * 4, '='))));
-const b64urlBytes = (bytes) => b64(bytes).replace(/=/g, '').replace(/\+/g, '-').replace(/\//g, '_');
-const constantTimeEqual = (a, b) => {
-  const aa = enc.encode(String(a || '')), bb = enc.encode(String(b || ''));
-  let diff = aa.length ^ bb.length;
-  const n = Math.max(aa.length, bb.length);
-  for (let i = 0; i < n; i++) diff |= (aa[i] || 0) ^ (bb[i] || 0);
-  return diff === 0;
-};
-async function deriveHash(password, salt, iterations = 210000) {
-  const key = await crypto.subtle.importKey("raw", enc.encode(password), "PBKDF2", false, ["deriveBits"]);
-  return b64(await crypto.subtle.deriveBits({ name: "PBKDF2", salt: from64(salt), iterations, hash: "SHA-256" }, key, 256));
+const json = (x, s = 200) =>
+    new Response(JSON.stringify(x), {
+      status: s,
+      headers: {
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "no-store",
+        "x-content-type-options": "nosniff",
+        "referrer-policy": "same-origin",
+      },
+    }),
+  fail = (e, s = 400) => json({ error: e }, s),
+  enc = new TextEncoder();
+const b64 = (x) => btoa(String.fromCharCode(...new Uint8Array(x))),
+  from64 = (x) => Uint8Array.from(atob(x), (c) => c.charCodeAt(0));
+async function hash(p, s) {
+  const k = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(p),
+    "PBKDF2",
+    false,
+    ["deriveBits"],
+  );
+  return b64(
+    await crypto.subtle.deriveBits(
+      { name: "PBKDF2", salt: from64(s), iterations: 100000, hash: "SHA-256" },
+      k,
+      256,
+    ),
+  );
 }
-async function hashPassword(password, salt) {
-  const iterations = 210000;
-  return `pbkdf2$${iterations}$${await deriveHash(password, salt, iterations)}`;
+async function mac(x, s) {
+  const k = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(s),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  return b64(await crypto.subtle.sign("HMAC", k, enc.encode(x)));
 }
-async function verifyPassword(password, salt, stored) {
-  const value = String(stored || '');
-  const match = value.match(/^pbkdf2\$(\d+)\$(.+)$/);
-  if (match) {
-    const iterations = Math.min(600000, Math.max(100000, Number(match[1]) || 210000));
-    return constantTimeEqual(await deriveHash(password, salt, iterations), match[2]);
-  }
-  // Legacy StockPilot accounts used raw PBKDF2-SHA256 output with 100k iterations.
-  if (/^[A-Za-z0-9+/]{43}=$/.test(value) || /^[A-Za-z0-9+/]{44}$/.test(value)) {
-    if (constantTimeEqual(await deriveHash(password, salt, 100000), value)) return true;
-    // Some transitional builds wrote the newer iteration count without the prefix.
-    if (constantTimeEqual(await deriveHash(password, salt, 210000), value)) return true;
-    return false;
-  }
-  // Very early local builds may have stored a literal 4-digit PIN. Accept only this exact
-  // legacy shape once, then immediately migrate it to PBKDF2 after successful login.
-  if (/^\d{4}$/.test(value)) return constantTimeEqual(password, value);
-  return false;
+async function issue(u, s) {
+  const h = btoa('{"alg":"HS256","typ":"JWT"}'),
+    p = btoa(JSON.stringify({ sub: u.id, exp: Date.now() + 6048e5 }));
+  return `${h}.${p}.${await mac(`${h}.${p}`, s)}`;
 }
-async function mac(x, secret) {
-  const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  return b64urlBytes(await crypto.subtle.sign("HMAC", key, enc.encode(x)));
-}
-async function issue(user, secret) {
-  const header = b64urlText(JSON.stringify({ alg: "HS256", typ: "JWT" }));
-  const payload = b64urlText(JSON.stringify({ sub: user.id, exp: Math.floor(Date.now() / 1000) + 604800, iat: Math.floor(Date.now() / 1000) }));
-  return `${header}.${payload}.${await mac(`${header}.${payload}`, secret)}`;
-}
-const sessionCookie = (token) => `sp_session=${encodeURIComponent(token)}; Path=/; Max-Age=604800; HttpOnly; Secure; SameSite=Strict`;
-const clearSessionCookie = () => `sp_session=; Path=/; Max-Age=0; HttpOnly; Secure; SameSite=Strict`;
-function cookieValue(request, name) {
-  const cookie = request.headers.get('cookie') || '';
-  for (const part of cookie.split(';')) {
-    const [key, ...rest] = part.trim().split('=');
-    if (key === name) return decodeURIComponent(rest.join('='));
-  }
-  return '';
-}
-async function verifyToken(token, secret) {
+async function who(r, e) {
   try {
-    const [h, p, signature] = String(token || '').split('.');
-    if (!h || !p || !signature) return null;
-    const expected = await mac(`${h}.${p}`, secret);
-    // New base64url signature.
-    let signatureOk = constantTimeEqual(signature, expected);
-    // Legacy base64 signature compatibility, only during migration.
-    if (!signatureOk) {
-      const legacyKey = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-      const legacy = b64(await crypto.subtle.sign("HMAC", legacyKey, enc.encode(`${h}.${p}`)));
-      signatureOk = constantTimeEqual(signature, legacy);
-    }
-    if (!signatureOk) return null;
-    let payload;
-    try { payload = JSON.parse(fromB64urlText(p)); } catch { payload = JSON.parse(atob(p)); }
-    const exp = Number(payload?.exp);
-    const expiryMs = exp > 10_000_000_000 ? exp : exp * 1000;
-    if (!payload?.sub || !Number.isFinite(exp) || expiryMs < Date.now()) return null;
-    return payload;
-  } catch { return null; }
+    if (!e.AUTH_SECRET) return null;
+    const v = (r.headers.get("authorization") || "").split(" "),
+      [h, p, signature] = (v[1] || "").split(".");
+    if (v[0] !== "Bearer" || !h || !p || !signature) return null;
+    const expected = await mac(`${h}.${p}`, e.AUTH_SECRET);
+    if (signature !== expected) return null;
+    const t = JSON.parse(atob(p));
+    if (!t?.sub || !Number.isFinite(Number(t.exp)) || Number(t.exp) < Date.now()) return null;
+    return e.DB.prepare("SELECT * FROM users WHERE id=?").bind(t.sub).first();
+  } catch {
+    return null;
+  }
 }
-async function who(request, env) {
-  if (!env.AUTH_SECRET) return null;
-  const auth = request.headers.get("authorization") || "";
-  const bearer = /^Bearer\s+(.+)$/i.exec(auth)?.[1] || '';
-  const token = cookieValue(request, 'sp_session') || bearer;
-  const payload = await verifyToken(token, env.AUTH_SECRET);
-  if (!payload) return null;
-  return env.DB.prepare("SELECT * FROM users WHERE id=?").bind(payload.sub).first();
-}
-async function safeJson(request, maxBytes = 100000) {
-  const length = Number(request.headers.get('content-length'));
-  if (Number.isFinite(length) && length > maxBytes) throw new Error('PAYLOAD_TOO_LARGE');
-  const text = await request.text();
-  if (text.length > maxBytes) throw new Error('PAYLOAD_TOO_LARGE');
-  try { return JSON.parse(text || '{}'); } catch { throw new Error('BAD_JSON'); }
-}
-const unsafeMethod = (method) => !['GET', 'HEAD', 'OPTIONS'].includes(method);
-function validRequestOrigin(request) {
-  if (!unsafeMethod(request.method)) return true;
-  const origin = request.headers.get('origin');
-  if (!origin) return true;
-  try { return origin === new URL(request.url).origin; } catch { return false; }
-}
-const safeLegacyPhoto = (value) => {
-  const text = String(value || "");
-  return /^data:image\/(?:png|jpeg|webp);base64,/i.test(text) && text.length <= 2_500_000 ? text : null;
-};
 const pub = (u) => ({
   id: u.id,
   username: u.username,
   firstName: u.first_name,
   lastName: u.last_name,
-  photo: u.photo_key ? `/api/images/${u.photo_key}` : safeLegacyPhoto(u.photo_text),
+  photo: u.photo_key ? `/api/images/${u.photo_key}` : null,
 });
-
-let authSchemaReady;
-async function userColumns(e) {
-  const result = await e.DB.prepare("PRAGMA table_info(users)").all();
-  return new Set((result.results || []).map((row) => String(row.name || "")));
-}
-function ensureAuthSchema(e) {
-  if (!authSchemaReady) {
-    authSchemaReady = (async () => {
-      await e.DB.prepare(`CREATE TABLE IF NOT EXISTS users (
-        id TEXT PRIMARY KEY,
-        username TEXT NOT NULL UNIQUE COLLATE NOCASE,
-        first_name TEXT NOT NULL,
-        last_name TEXT NOT NULL,
-        password_hash TEXT NOT NULL,
-        salt TEXT NOT NULL,
-        photo_key TEXT,
-        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-      )`).run();
-
-      // Existing deployments may use the old `photo_text` column. CREATE TABLE IF NOT EXISTS
-      // does not migrate an existing table, so add modern columns in-place without deleting data.
-      let columns = await userColumns(e);
-      if (!columns.has("photo_key")) {
-        await e.DB.prepare("ALTER TABLE users ADD COLUMN photo_key TEXT").run();
-        columns = await userColumns(e);
-      }
-      if (!columns.has("created_at")) {
-        await e.DB.prepare("ALTER TABLE users ADD COLUMN created_at TEXT").run();
-        await e.DB.prepare("UPDATE users SET created_at=CURRENT_TIMESTAMP WHERE created_at IS NULL OR created_at='' ").run();
-      }
-
-      await e.DB.prepare(`CREATE TABLE IF NOT EXISTS user_state (
-        user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-        state_json TEXT NOT NULL,
-        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-      )`).run();
-
-      // Case-insensitive lookup index for legacy tables that were created without COLLATE NOCASE.
-      try { await e.DB.prepare("CREATE INDEX IF NOT EXISTS idx_users_username_nocase ON users(username COLLATE NOCASE)").run(); } catch {}
-      return true;
-    })().catch((error) => { authSchemaReady = null; throw error; });
-  }
-  return authSchemaReady;
-}
 const readState = async (e, id) => {
   const row = await e.DB.prepare("SELECT state_json FROM user_state WHERE user_id=?").bind(id).first();
   if (!row?.state_json) return { orders: [], customerSales: [] };
@@ -211,16 +83,9 @@ const validateState = (state) => {
     if (!order || typeof order !== "object" || !Array.isArray(order.items)) return "Sifariş məlumatı düzgün deyil.";
     if (order.items.length > 5000) return "Bir sifarişdə məhsul sayı limitdən çoxdur.";
   }
-  if (!validateStateTree(state)) return "Məlumat daxilində icazə verilməyən və ya həddən artıq böyük dəyər var.";
   const encoded = JSON.stringify(state);
   if (encoded.length > 8_000_000) return "Məlumat ölçüsü çox böyükdür.";
   return null;
-};
-const safeImageValue = (value) => {
-  const src = String(value || "").trim();
-  if (/^data:image\/(?:jpeg|png|webp);base64,[a-z0-9+/=]+$/i.test(src) && src.length <= 2_500_000) return src;
-  if (/^\/api\/images\/[A-Za-z0-9_./%-]+$/.test(src) && !src.includes("..")) return src;
-  return "";
 };
 const productList = (state, reserved = {}) =>
   (state.orders || []).flatMap((order) =>
@@ -233,7 +98,7 @@ const productList = (state, reserved = {}) =>
         category: item.category || "Digər",
         price: Number(item.sale) || 0,
         quantity: Math.max(0, physical - (Number(reserved[id]) || 0)),
-        image: safeImageValue(item.img || item.image || ""),
+        image: item.img || "",
         orderId: order.id,
         index,
         sold: Boolean(item.sold),
@@ -361,12 +226,12 @@ const whatsappPhone = (value) => {
 };
 let notificationSchemaReady;
 function ensureNotifications(e) {
+  // DDL yalnız hər Worker isolate üçün bir dəfə işləyir; hər bildirişdə D1-i yükləmir.
   if (!notificationSchemaReady) {
-    notificationSchemaReady = (async () => {
-      await e.DB.prepare("CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, kind TEXT NOT NULL DEFAULT 'info', title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', data_json TEXT, is_read INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run();
-      await e.DB.prepare("CREATE INDEX IF NOT EXISTS idx_notifications_owner ON notifications(owner_user_id, is_read, created_at DESC)").run();
-      return true;
-    })().catch((error) => { notificationSchemaReady = null; throw error; });
+    notificationSchemaReady = Promise.all([
+      e.DB.prepare("CREATE TABLE IF NOT EXISTS notifications (id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, kind TEXT NOT NULL DEFAULT 'info', title TEXT NOT NULL, body TEXT NOT NULL DEFAULT '', data_json TEXT, is_read INTEGER NOT NULL DEFAULT 0, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run(),
+      e.DB.prepare("CREATE INDEX IF NOT EXISTS idx_notifications_owner ON notifications(owner_user_id, is_read, created_at DESC)").run(),
+    ]);
   }
   return notificationSchemaReady;
 }
@@ -557,93 +422,40 @@ async function bingSearch(query) {
 function normalizeProductQuery(name='') {
   return String(name).replace(/[|]/g,' ').replace(/\s+/g,' ').trim();
 }
-function productTokens(name='') {
-  return normalizeProductQuery(name).toLowerCase().replace(/[^a-z0-9çğıöşü\s.-]/g,' ').split(/\s+/).filter(t=>t.length>=3 && !['the','and','for','with','gram','grams','powder'].includes(t));
-}
-function expectedWeight(name='', fallback=0) {
-  const m=String(name).match(/(?:^|\s)(\d{2,5})\s*(?:g|gr|gram|grams)\b/i);
-  return m ? Number(m[1]) : Number(fallback)||0;
-}
-function trustedSourceScore(host='') {
-  const h=String(host).toLowerCase().replace(/^www\./,'');
-  const preferred=[
-    ['optimumnutrition.com',100],['iherb.com',96],['amazon.com',94],['amazon.de',93],['amazon.co.uk',93],
-    ['walmart.com',90],['vitacost.com',88],['bodybuilding.com',86],['gnc.com',86],['trendyol.com',82],['hepsiburada.com',80]
-  ];
-  for(const [domain,score] of preferred) if(h===domain||h.endsWith('.'+domain)) return score;
-  return 45;
-}
-function brandOfficialQuery(name='') {
-  const lower=String(name).toLowerCase();
-  if(lower.includes('optimum nutrition')) return `site:optimumnutrition.com ${name}`;
-  if(lower.includes('muscletech')) return `site:muscletech.com ${name}`;
-  if(lower.includes('dymatize')) return `site:dymatize.com ${name}`;
-  if(lower.includes('now foods')) return `site:nowfoods.com ${name}`;
-  return '';
-}
 async function multiPriceSearch(productName, countryName='') {
   const name=normalizeProductQuery(productName);
-  const official=brandOfficialQuery(name);
   const queries=[
-    official,
-    `site:iherb.com "${name}"`,
-    `site:amazon.com "${name}"`,
-    `"${name}" ${countryName} buy price`,
-    `"${name}" price`,
-  ].filter(Boolean).slice(0,5);
+    `${name} price buy`,
+    `"${name}" shop price`,
+    `${name} ${countryName} price`,
+    `site:iherb.com ${name}`,
+    `site:amazon.com ${name}`,
+    `site:walmart.com ${name}`,
+    `site:trendyol.com ${name}`,
+  ];
   const merged=[];
-  for(const q of queries){
+  for(const q of queries.slice(0,5)){
     const [a,b]=await Promise.all([duckSearch(q),bingSearch(q)]);
     merged.push(...a,...b);
-    if(merged.length>=40) break;
+    if(merged.length>=18) break;
   }
   const seen=new Set();
   return merged.filter(r=>{
-    try {
-      const u=approvedSellerUrl(r.url); if(!u) return false; const key=`${u.hostname}${u.pathname}`.replace(/\/$/,'');
-      if(seen.has(key)) return false; seen.add(key);
-      r.url=u.href; r.source=u.hostname.replace(/^www\./,'');
-      return true;
-    } catch{return false}
-  }).sort((a,b)=>trustedSourceScore(b.source)-trustedSourceScore(a.source)).slice(0,26);
+    try { const u=new URL(r.url); const key=`${u.hostname}${u.pathname}`.replace(/\/$/,''); if(seen.has(key))return false; seen.add(key); return true; }
+    catch{return false}
+  }).slice(0,18);
 }
-function pushPrice(out, raw, currency='', confidence=1, kind='structured') {
-  const cleaned=String(raw).trim().replace(/\s/g,'').replace(/,(?=\d{3}\b)/g,'').replace(',','.').replace(/[^0-9.]/g,'');
-  const n=Number(cleaned);
-  if(Number.isFinite(n)&&n>0&&n<100000) out.push({raw:n,currency:String(currency||'').toUpperCase(),confidence,kind});
-}
-function structuredPriceCandidates(html, host='') {
+function priceCandidates(html) {
   const out=[];
-  // JSON-LD Product/Offer qiymətləri: ən etibarlı mənbə.
-  const scripts=[...String(html).matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)].slice(0,20);
-  for(const m of scripts){
-    try {
-      const data=JSON.parse(m[1].trim());
-      const nodes=Array.isArray(data)?data:[data];
-      const walk=(node)=>{
-        if(!node||typeof node!=='object') return;
-        const type=String(node['@type']||'').toLowerCase();
-        if(type.includes('offer')||type.includes('product')){
-          if(node.price!==undefined) pushPrice(out,node.price,node.priceCurrency||'',1,'jsonld');
-          if(node.lowPrice!==undefined) pushPrice(out,node.lowPrice,node.priceCurrency||'',.96,'jsonld-low');
-          if(node.offers) walk(node.offers);
-        }
-        for(const v of Object.values(node)) if(v&&typeof v==='object') Array.isArray(v)?v.forEach(walk):walk(v);
-      };
-      nodes.forEach(walk);
-    } catch{}
-  }
+  const push=(raw,currency='')=>{ const n=Number(String(raw).replace(/\s/g,'').replace(/,(?=\d{3}\b)/g,'').replace(',','.').replace(/[^0-9.]/g,'')); if(Number.isFinite(n)&&n>0&&n<100000) out.push({raw:n,currency}); };
   const metaPatterns=[
-    /<meta[^>]+(?:property|name|itemprop)=["'](?:product:price:amount|og:price:amount|price)["'][^>]+content=["']([0-9.,]+)["'][^>]*>/gi,
-    /<meta[^>]+content=["']([0-9.,]+)["'][^>]+(?:property|name|itemprop)=["'](?:product:price:amount|og:price:amount|price)["'][^>]*>/gi,
+    /(?:product:price:amount|itemprop=["']price["'])[^>]*(?:content|value)=["']([0-9.,]+)["']/gi,
+    /(?:content|value)=["']([0-9.,]+)["'][^>]*(?:product:price:amount|itemprop=["']price["'])/gi,
+    /"price"\s*:\s*"?([0-9.,]+)"?/gi,
   ];
-  for(const re of metaPatterns){let m;while((m=re.exec(html))&&out.length<30) pushPrice(out,m[1],'',.92,'meta');}
-  const h=String(host).toLowerCase();
-  if(h.includes('amazon.')){
-    let m;
-    const re=/<span[^>]+class=["'][^"']*a-price-whole[^"']*["'][^>]*>([0-9.,]+)<\/span>[\s\S]{0,180}?<span[^>]+class=["'][^"']*a-price-fraction[^"']*["'][^>]*>([0-9]{2})<\/span>/gi;
-    while((m=re.exec(html))&&out.length<30) pushPrice(out,`${m[1]}.${m[2]}`,'USD',.9,'amazon-main');
-  }
+  for(const re of metaPatterns){let m; while((m=re.exec(html))&&out.length<20) push(m[1]);}
+  const symbolPatterns=[[/\$\s*([0-9]+(?:[.,][0-9]{1,2})?)/g,'USD'],[/€\s*([0-9]+(?:[.,][0-9]{1,2})?)/g,'EUR'],[/([0-9]+(?:[.,][0-9]{1,2})?)\s*(?:₼|AZN)\b/g,'AZN'],[/([0-9]+(?:[.,][0-9]{1,2})?)\s*(?:₺|TRY)\b/g,'TRY']];
+  for(const [re,c] of symbolPatterns){let m; while((m=re.exec(html))&&out.length<25) push(m[1],c);}
   return out;
 }
 function detectedCurrency(html, fallbackSymbol) {
@@ -659,58 +471,31 @@ function currencyRateToAzn(code, state, fallbackCountry) {
   const countries = Object.values(state.countries || defaultAiCountries);
   if (code === 'EUR') { const x=countries.find(c=>c.currency==='€'); return Number(x?.rate)||1.96; }
   if (code === 'USD') { const x=countries.find(c=>c.currency==='$'); return Number(x?.rate)||1.7; }
+  // TRY yalnız state-də ₺ tarifi varsa istifadə olunur; yoxdursa qeyri-dəqiq çevirmə etmə.
   if (code === 'TRY') { const x=countries.find(c=>c.currency==='₺' || c.currency==='TRY'); return Number(x?.rate)||0; }
   return Number(fallbackCountry?.rate)||0;
 }
-function pageProductMatch(html, watch, resultTitle='') {
-  const text=decodeHtml(`${resultTitle} ${(String(html).match(/<title[^>]*>([\s\S]*?)<\/title>/i)||[])[1]||''} ${(String(html).match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)||[])[1]||''}`).toLowerCase();
-  const tokens=productTokens(watch.product_name);
-  if(!tokens.length) return {ok:true,score:1};
-  const hit=tokens.filter(t=>text.includes(t)).length;
-  let score=hit/tokens.length;
-  const want=expectedWeight(watch.product_name,watch.weight_grams);
-  if(want){
-    const weights=[...text.matchAll(/(\d{2,5})\s*(?:g|gr|gram|grams)\b/gi)].map(m=>Number(m[1]));
-    if(weights.length){
-      const close=weights.some(w=>Math.abs(w-want)<=Math.max(10,want*.08));
-      if(close) score+=.25; else score-=.35;
-    }
-  }
-  return {ok:score>=.55,score};
-}
 async function offerFromPage(result, state, watch) {
-  const url=approvedSellerUrl(result.url); if(!url) return null;
+  const url=safeExternalUrl(result.url); if(!url) return null;
   try {
-    const res=await fetch(url.href,{redirect:'follow',headers:{'user-agent':'Mozilla/5.0 (compatible; StockPilotPriceVerifier/2.0)','accept':'text/html,application/xhtml+xml','accept-language':'en-US,en;q=0.8'}});
+    const res=await fetch(url.href,{redirect:'follow',headers:{'user-agent':'Mozilla/5.0 StockPilotPriceMonitor/1.0','accept':'text/html,application/xhtml+xml'}});
     if(!res.ok) return null;
     const type=res.headers.get('content-type')||''; if(!type.includes('text/html')) return null;
-    const html=(await res.text()).slice(0,1200000);
-    const match=pageProductMatch(html,watch,result.title||'');
-    if(!match.ok) return null;
+    const html=(await res.text()).slice(0,900000);
     const country=aiCountry(state,watch.country_key);
-    const candidates=structuredPriceCandidates(html,url.hostname);
+    const candidates=priceCandidates(html);
     if(!candidates.length) return null;
     const fallbackCode=detectedCurrency(html,country.currency);
     const converted=[];
-    for(const c of candidates){
-      const code=c.currency||fallbackCode; const rate=currencyRateToAzn(code,state,country);
-      if(rate>0) converted.push({...c,code,azn:c.raw*rate});
-    }
+    for(const c of candidates){ const code=c.currency||fallbackCode; const rate=currencyRateToAzn(code,state,country); if(rate>0) converted.push({raw:c.raw,code,azn:c.raw*rate}); }
     if(!converted.length) return null;
-    // Main offer qiymətini seç: structured confidence + məntiqli qiymət aralığı.
-    const current=Number(watch.current_total_azn)||0;
-    const lower=current>0 ? Math.max(3,current*.28) : 3;
-    const upper=current>0 ? Math.max(150,current*3.5) : 500;
-    const plausible=converted.filter(x=>x.azn>=lower&&x.azn<=upper).sort((a,b)=>b.confidence-a.confidence || a.azn-b.azn);
-    if(!plausible.length) return null;
-    const pick=plausible[0];
+    // məhsul səhifəsindəki çox kiçik kupon/faiz rəqəmlərini azaltmaq üçün cari qiymətin 15%-indən aşağı namizədləri at.
+    const floor=Math.max(1,(Number(watch.current_total_azn)||0)*0.15);
+    const plausible=converted.filter(x=>x.azn>=floor).sort((a,b)=>a.azn-b.azn);
+    const pick=plausible[0]||converted.sort((a,b)=>a.azn-b.azn)[0];
     const shipping=Math.round(aiShipping(watch.weight_grams,country)*(Number(country.rate)||1)*100)/100;
     const product=Math.round(pick.azn*100)/100, total=Math.round((product+shipping)*100)/100;
-    return {
-      title:result.title||watch.product_name,url:url.href,source:result.source||url.hostname,
-      productPriceAzn:product,shippingAzn:shipping,totalAzn:total,currency:pick.code,rawPrice:pick.raw,
-      verified:true,sourceScore:trustedSourceScore(url.hostname),matchScore:Math.round(match.score*100)/100,priceKind:pick.kind
-    };
+    return { title:result.title||watch.product_name,url:url.href,source:result.source||url.hostname,productPriceAzn:product,shippingAzn:shipping,totalAzn:total,currency:pick.code,rawPrice:pick.raw };
   } catch { return null; }
 }
 async function scanAiProduct(e, ownerId, productId, {notify=true,sync=true}={}) {
@@ -720,13 +505,11 @@ async function scanAiProduct(e, ownerId, productId, {notify=true,sync=true}={}) 
   const country=aiCountry(state,watch.country_key);
   const results=await multiPriceSearch(watch.product_name,country.name||'');
   const offers=[];
-  for(const result of results.slice(0,5)){ const offer=await offerFromPage(result,state,watch); if(offer) offers.push(offer); }
-  offers.sort((a,b)=>(b.sourceScore||0)-(a.sourceScore||0) || a.totalAzn-b.totalAzn);
+  for(const result of results.slice(0,9)){ const offer=await offerFromPage(result,state,watch); if(offer) offers.push(offer); }
+  offers.sort((a,b)=>a.totalAzn-b.totalAzn);
   await e.DB.prepare('DELETE FROM ai_price_offers WHERE owner_user_id=? AND product_id=?').bind(ownerId,productId).run();
   for(const o of offers.slice(0,5)){ await e.DB.prepare(`INSERT INTO ai_price_offers(id,owner_user_id,product_id,title,url,source,product_price_azn,shipping_azn,total_azn,currency,raw_price) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).bind(crypto.randomUUID(),ownerId,productId,String(o.title).slice(0,300),String(o.url).slice(0,1500),String(o.source).slice(0,150),o.productPriceAzn,o.shippingAzn,o.totalAzn,o.currency,o.rawPrice).run(); }
-  const oldBest=Number(watch.best_total_azn)||0;
-  const trustedOffers=offers.filter(o=>(o.sourceScore||0)>=80);
-  const best=(trustedOffers.length?trustedOffers:offers).slice().sort((a,b)=>a.totalAzn-b.totalAzn)[0]||null, now=new Date().toISOString();
+  const oldBest=Number(watch.best_total_azn)||0, best=offers[0]||null, now=new Date().toISOString();
   if(best){
     await e.DB.prepare(`UPDATE ai_price_watch SET last_scan_at=?,best_total_azn=?,best_product_azn=?,best_shipping_azn=?,best_title=?,best_url=?,best_source=?,updated_at=CURRENT_TIMESTAMP WHERE owner_user_id=? AND product_id=?`).bind(now,best.totalAzn,best.productPriceAzn,best.shippingAzn,String(best.title).slice(0,300),String(best.url).slice(0,1500),String(best.source).slice(0,150),ownerId,productId).run();
     const current=Number(watch.current_total_azn)||0, threshold=Math.max(0,Number(watch.threshold_pct)||8);
@@ -752,193 +535,105 @@ async function aiPurchasePayload(e,ownerId){
 }
 async function scanAllAiWatches(e){
   await ensureAiPurchaseSchema(e);
-  const rows=await e.DB.prepare("SELECT owner_user_id,product_id FROM ai_price_watch WHERE enabled=1 ORDER BY COALESCE(last_scan_at,'1970-01-01') ASC LIMIT 3").all();
+  const rows=await e.DB.prepare("SELECT owner_user_id,product_id FROM ai_price_watch WHERE enabled=1 ORDER BY COALESCE(last_scan_at,'1970-01-01') ASC LIMIT 6").all();
   for(const row of rows.results||[]){ try{ await scanAiProduct(e,row.owner_user_id,row.product_id,{notify:true,sync:false}); }catch{} }
-}
-
-let securitySchemaReady;
-function ensureSecuritySchema(env) {
-  if (!securitySchemaReady) {
-    securitySchemaReady = (async () => {
-      await env.DB.prepare(`CREATE TABLE IF NOT EXISTS security_rate_limits (
-        key_hash TEXT PRIMARY KEY,
-        count INTEGER NOT NULL DEFAULT 0,
-        window_start INTEGER NOT NULL,
-        updated_at INTEGER NOT NULL
-      )`).run();
-      await env.DB.prepare("CREATE INDEX IF NOT EXISTS idx_security_rate_updated ON security_rate_limits(updated_at)").run();
-      return true;
-    })().catch((error) => { securitySchemaReady = null; throw error; });
-  }
-  return securitySchemaReady;
-}
-async function clientKey(request, env, scope, subject = '') {
-  const ip = request.headers.get('cf-connecting-ip') || request.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
-  const raw = `${scope}|${subject}|${ip}`;
-  return mac(raw, env.AUTH_SECRET || 'stockpilot-rate-limit');
-}
-async function checkRateLimit(request, env, scope, { limit = 20, windowSec = 600, subject = '' } = {}) {
-  await ensureSecuritySchema(env);
-  const key = await clientKey(request, env, scope, subject);
-  const now = Math.floor(Date.now() / 1000), threshold = now - windowSec;
-  await env.DB.prepare(`INSERT INTO security_rate_limits(key_hash,count,window_start,updated_at)
-    VALUES(?,1,?,?) ON CONFLICT(key_hash) DO UPDATE SET
-      count=CASE WHEN security_rate_limits.window_start<? THEN 1 ELSE security_rate_limits.count+1 END,
-      window_start=CASE WHEN security_rate_limits.window_start<? THEN excluded.window_start ELSE security_rate_limits.window_start END,
-      updated_at=excluded.updated_at`)
-    .bind(key, now, now, threshold, threshold).run();
-  const row = await env.DB.prepare("SELECT count,window_start FROM security_rate_limits WHERE key_hash=?").bind(key).first();
-  const allowed = (Number(row?.count) || 0) <= limit;
-  const retryAfter = Math.max(1, windowSec - (now - (Number(row?.window_start) || now)));
-  return { allowed, retryAfter };
-}
-function rateLimited(result) {
-  return fail("Çox tez-tez sorğu göndərildi. Bir az sonra yenidən cəhd edin.", 429, { retryAfter: result.retryAfter });
-}
-function safeParseJson(text, fallback = null) {
-  try { return JSON.parse(text); } catch { return fallback; }
-}
-function validateStateTree(value, depth = 0) {
-  if (depth > 10) return false;
-  if (value === null || typeof value === 'boolean') return true;
-  if (typeof value === 'number') return Number.isFinite(value) && Math.abs(value) <= 1e12;
-  if (typeof value === 'string') {
-    if (value.startsWith('data:image/')) return value.length <= 2_500_000;
-    return value.length <= 20000;
-  }
-  if (Array.isArray(value)) return value.length <= 6000 && value.every((item) => validateStateTree(item, depth + 1));
-  if (typeof value === 'object') {
-    const entries = Object.entries(value);
-    return entries.length <= 200 && entries.every(([key, item]) => key.length <= 100 && validateStateTree(item, depth + 1));
-  }
-  return false;
-}
-const PUBLIC_SELLER_DOMAINS = [
-  'optimumnutrition.com','muscletech.com','dymatize.com','nowfoods.com','iherb.com','amazon.com','amazon.de','amazon.co.uk',
-  'walmart.com','vitacost.com','bodybuilding.com','gnc.com','trendyol.com','hepsiburada.com'
-];
-function approvedSellerUrl(raw) {
-  const url = safeExternalUrl(raw);
-  if (!url || url.protocol !== 'https:') return null;
-  const host = url.hostname.toLowerCase().replace(/^www\./, '');
-  return PUBLIC_SELLER_DOMAINS.some((domain) => host === domain || host.endsWith('.' + domain)) ? url : null;
 }
 
 export default {
   async fetch(r, e) {
     const u = new URL(r.url),
       p = u.pathname;
-    if (p.startsWith("/api/") && !e.AUTH_SECRET) return fail("Server security secret konfiqurasiya olunmayıb.", 503);
-    if (p.startsWith("/api/") && !validRequestOrigin(r)) return fail("Sorğunun mənbəyi qəbul edilmir.", 403);
     if (p.startsWith("/api/images/")) {
       if (!e.IMAGES) return new Response("Not found", { status: 404 });
-      let key;
-      try { key = decodeURIComponent(p.slice(12)); } catch { return new Response("Not found", { status: 404 }); }
-      if (!key || key.length > 500 || key.includes("..")) return new Response("Not found", { status: 404 });
-      const o = await e.IMAGES.get(key);
-      if (!o) return new Response("Not found", { status: 404 });
-      const type = String(o.httpMetadata?.contentType || "").toLowerCase();
-      if (!["image/jpeg","image/png","image/webp"].includes(type)) return new Response("Not found", { status: 404 });
-      const headers = new Headers({ "content-type": type, "cache-control": "public, max-age=86400", "x-content-type-options": "nosniff" });
-      applySecurityHeaders(headers);
-      return new Response(o.body, { headers });
+      const o = await e.IMAGES.get(decodeURIComponent(p.slice(12)));
+      return o
+        ? new Response(o.body, {
+            headers: {
+              "content-type": o.httpMetadata?.contentType || "image/jpeg",
+            },
+          })
+        : new Response("Not found", { status: 404 });
     }
     if (p === "/api/register" && r.method === "POST") {
-      try { await ensureAuthSchema(e); } catch (error) {
-        console.error("auth schema init failed", error);
-        return fail("Hesab bazası hazırlanmadı. Deploy zamanı D1 bağlantısını yoxlayın.", 500);
-      }
-      const rl = await checkRateLimit(r, e, "register", { limit: 5, windowSec: 3600 });
-      if (!rl.allowed) return rateLimited(rl);
-      const length = Number(r.headers.get("content-length"));
-      if (Number.isFinite(length) && length > 5_000_000) return fail("Qeydiyyat məlumatı çox böyükdür.", 413);
-      let f;
-      try { f = await r.formData(); } catch { return fail("Qeydiyyat formu oxunmadı."); }
-      const username = String(f.get("username") || "").trim().toLowerCase();
-      const first = String(f.get("firstName") || "").trim();
-      const last = String(f.get("lastName") || "").trim();
-      const password = String(f.get("password") || "");
-      if (!/^[a-z0-9_.-]{3,30}$/i.test(username) || !first || !last || first.length > 80 || last.length > 80)
+      const f = await r.formData(),
+        username = String(f.get("username") || "").trim(),
+        first = String(f.get("firstName") || "").trim(),
+        last = String(f.get("lastName") || "").trim(),
+        password = String(f.get("password") || "");
+      if (!/^[\w.-]{3,30}$/.test(username) || !first || !last)
         return fail("Bütün məlumatları düzgün yazın.");
       if (!/^\d{4}$/.test(password)) return fail("Şifrə 4 rəqəm olmalıdır.");
-      if (await e.DB.prepare("SELECT id FROM users WHERE username=? COLLATE NOCASE").bind(username).first())
+      if (
+        await e.DB.prepare("SELECT id FROM users WHERE username=?")
+          .bind(username)
+          .first()
+      )
         return fail("Username artıq istifadə olunur.", 409);
-      const id = crypto.randomUUID(), salt = b64(crypto.getRandomValues(new Uint8Array(16)));
-      let key = null, file = f.get("photo");
+      const id = crypto.randomUUID(),
+        salt = b64(crypto.getRandomValues(new Uint8Array(16)));
+      let key = null,
+        file = f.get("photo");
       if (file && typeof file !== "string" && file.size) {
-        if (file.size > 4_000_000) return fail("Şəkil maksimum 4MB olmalıdır.");
-        const type = String(file.type || "").toLowerCase();
-        if (!["image/jpeg","image/png","image/webp"].includes(type)) return fail("Yalnız JPG, PNG və WEBP şəkilləri qəbul olunur.");
-        // Photo is optional. Deployments without an IMAGES/R2 binding must still be able to register.
-        if (e.IMAGES) {
-          key = `profiles/${id}/${crypto.randomUUID()}`;
-          await e.IMAGES.put(key, file.stream(), { httpMetadata: { contentType: type } });
-        }
+        if (!e.IMAGES)
+          return fail(
+            "Profil şəkli hazırda aktiv deyil. Şəkilsiz qeydiyyatdan keçin.",
+          );
+        if (file.size > 4e6) return fail("Şəkil maksimum 4MB olmalıdır.");
+        key = `profiles/${id}/${crypto.randomUUID()}`;
+        await e.IMAGES.put(key, file.stream(), {
+          httpMetadata: { contentType: file.type },
+        });
       }
-      const passwordHash = await hashPassword(password, salt);
-      try {
-        await e.DB.batch([
-          e.DB.prepare("INSERT INTO users(id,username,first_name,last_name,password_hash,salt,photo_key) VALUES(?,?,?,?,?,?,?)")
-            .bind(id, username, first, last, passwordHash, salt, key),
-          e.DB.prepare("INSERT INTO user_state(user_id,state_json) VALUES(?,?)")
-            .bind(id, '{"orders":[],"customerSales":[]}'),
-        ]);
-      } catch (error) {
-        console.error("register database write failed", error);
-        const text = String(error?.message || error || "");
-        if (/unique|constraint/i.test(text)) return fail("Username artıq istifadə olunur.", 409);
-        if (/no such column|table.*has no column/i.test(text)) return fail("Hesab bazası köhnə sxemdədir. Worker-i yenidən deploy edin və bir dəfə yenidən cəhd edin.", 500);
-        return fail("Hesab database-ə yazılmadı. Yenidən cəhd edin.", 500);
-      }
-      const user = { id, username, first_name: first, last_name: last, photo_key: key };
-      const token = await issue(user, e.AUTH_SECRET);
-      return json({ user: pub(user) }, 201, { "set-cookie": sessionCookie(token) });
+      await e.DB.prepare(
+        "INSERT INTO users(id,username,first_name,last_name,password_hash,salt,photo_key) VALUES(?,?,?,?,?,?,?)",
+      )
+        .bind(id, username, first, last, await hash(password, salt), salt, key)
+        .run();
+      await e.DB.prepare(
+        "INSERT INTO user_state(user_id,state_json) VALUES(?,?)",
+      )
+        .bind(id, '{"orders":[],"customerSales":[]}')
+        .run();
+      const user = {
+        id,
+        username,
+        first_name: first,
+        last_name: last,
+        photo_key: key,
+      };
+      return json(
+        { token: await issue(user, e.AUTH_SECRET), user: pub(user) },
+        201,
+      );
     }
     if (p === "/api/login" && r.method === "POST") {
-      try { await ensureAuthSchema(e); } catch (error) {
-        console.error("auth schema init failed", error);
-        return fail("Hesab bazası hazırlanmadı. D1 bağlantısını yoxlayın.", 500);
-      }
-      let body;
-      try { body = await safeJson(r, 5000); } catch (error) { return fail(error.message === 'PAYLOAD_TOO_LARGE' ? "Sorğu çox böyükdür." : "JSON düzgün deyil.", error.message === 'PAYLOAD_TOO_LARGE' ? 413 : 400); }
-      const username = String(body.username || "").trim().toLowerCase();
-      const password = String(body.password || "");
-      const rl = await checkRateLimit(r, e, "login", { limit: 12, windowSec: 900, subject: username.slice(0, 50) });
-      if (!rl.allowed) return rateLimited(rl);
-      // Legacy D1 databases may have been created before users.username had COLLATE NOCASE.
-      // Explicit COLLATE NOCASE keeps old mixed-case usernames login-compatible.
-      const user = await e.DB.prepare("SELECT * FROM users WHERE username=? COLLATE NOCASE").bind(username).first();
-      let valid = false;
-      if (user && /^\d{4}$/.test(password)) valid = await verifyPassword(password, user.salt, user.password_hash);
-      else if (/^\d{4}$/.test(password)) await deriveHash(password, b64(new Uint8Array(16)), 100000);
-      if (!user || !valid) return fail("Məlumatlar yanlışdır.", 401);
-      if (!String(user.password_hash).startsWith('pbkdf2$')) {
-        const upgraded = await hashPassword(password, user.salt);
-        await e.DB.prepare("UPDATE users SET password_hash=? WHERE id=?").bind(upgraded, user.id).run();
-        user.password_hash = upgraded;
-      }
-      const token = await issue(user, e.AUTH_SECRET);
-      return json({ user: pub(user) }, 200, { "set-cookie": sessionCookie(token) });
+      const { username, password } = await r.json(),
+        user = await e.DB.prepare("SELECT * FROM users WHERE username=?")
+          .bind(String(username || "").trim())
+          .first();
+      if (
+        !user ||
+        !/^\d{4}$/.test(password || "") ||
+        (await hash(password, user.salt)) !== user.password_hash
+      )
+        return fail("Məlumatlar yanlışdır.", 401);
+      return json({ token: await issue(user, e.AUTH_SECRET), user: pub(user) });
     }
-    if (p === "/api/logout" && r.method === "POST") return json({ ok: true }, 200, { "set-cookie": clearSessionCookie() });
     const storeMatch = p.match(/^\/api\/store\/([\w.-]{3,30})$/);
     if (storeMatch && r.method === "GET") {
-      const owner = await e.DB.prepare("SELECT * FROM users WHERE username=? COLLATE NOCASE").bind(storeMatch[1]).first();
+      const owner = await e.DB.prepare("SELECT * FROM users WHERE username=?").bind(storeMatch[1]).first();
       if (!owner) return fail("Mağaza tapılmadı.", 404);
       const state = await readState(e, owner.id);
       const reserved = await reservedStock(e, owner.id);
       // Kataloq tam görünür; aktiv müştəri sifarişlərində rezerv olunan say mövcud stokdan çıxılır.
       const storeSettings = await readStoreSettings(e, owner.id);
-      const publicProducts = productList(state, reserved).map(({ quantity, sold, orderId, index, ...product }) => product);
-      return json({ shop: { username: owner.username, name: `${owner.first_name} ${owner.last_name}`, originLabel: storeSettings.originLabel }, products: publicProducts });
+      return json({ shop: { username: owner.username, name: `${owner.first_name} ${owner.last_name}`, originLabel: storeSettings.originLabel }, products: productList(state, reserved) });
     }
     const storeQuoteMatch = p.match(/^\/api\/store\/([\w.-]{3,30})\/delivery-quote$/);
     if (storeQuoteMatch && r.method === "POST") {
-      const rl = await checkRateLimit(r, e, "delivery-quote", { limit: 60, windowSec: 600, subject: storeQuoteMatch[1] });
-      if (!rl.allowed) return rateLimited(rl);
-      const owner = await e.DB.prepare("SELECT id FROM users WHERE username=? COLLATE NOCASE").bind(storeQuoteMatch[1]).first();
+      const owner = await e.DB.prepare("SELECT id FROM users WHERE username=?").bind(storeQuoteMatch[1]).first();
       if (!owner) return fail("Mağaza tapılmadı.", 404);
-      let body; try { body = await safeJson(r, 10000); } catch { return fail("Sorğu düzgün deyil."); }
+      const body = await r.json();
       const lat = Number(body.lat), lng = Number(body.lng), preferredAt = String(body.preferredAt || "");
       if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) return fail("Çatdırılma konumu düzgün deyil.");
       if (!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::\d{2})?$/.test(preferredAt)) return fail("Çatdırılma vaxtı düzgün deyil.");
@@ -946,9 +641,7 @@ export default {
     }
     const storeTrackMatch = p.match(/^\/api\/store\/([\w.-]{3,30})\/orders\/([0-9a-fA-F-]{36})$/);
     if (storeTrackMatch && r.method === "GET") {
-      const rl = await checkRateLimit(r, e, "order-track", { limit: 120, windowSec: 600, subject: storeTrackMatch[1] });
-      if (!rl.allowed) return rateLimited(rl);
-      const owner = await e.DB.prepare("SELECT id FROM users WHERE username=? COLLATE NOCASE").bind(storeTrackMatch[1]).first();
+      const owner = await e.DB.prepare("SELECT id FROM users WHERE username=?").bind(storeTrackMatch[1]).first();
       if (!owner) return fail("Mağaza tapılmadı.", 404);
       const row = await e.DB.prepare("SELECT order_json,status FROM customer_orders WHERE id=? AND owner_user_id=?").bind(storeTrackMatch[2], owner.id).first();
       if (!row) return fail("Sifariş tapılmadı.", 404);
@@ -975,40 +668,23 @@ export default {
     }
     const storeOrderMatch = p.match(/^\/api\/store\/([\w.-]{3,30})\/orders$/);
     if (storeOrderMatch && r.method === "POST") {
-      const rl = await checkRateLimit(r, e, "store-order", { limit: 20, windowSec: 600, subject: storeOrderMatch[1] });
-      if (!rl.allowed) return rateLimited(rl);
-      const owner = await e.DB.prepare("SELECT * FROM users WHERE username=? COLLATE NOCASE").bind(storeOrderMatch[1]).first();
+      const owner = await e.DB.prepare("SELECT * FROM users WHERE username=?").bind(storeOrderMatch[1]).first();
       if (!owner) return fail("Mağaza tapılmadı.", 404);
-      let body; try { body = await safeJson(r, 100000); } catch (error) { return fail(error.message === 'PAYLOAD_TOO_LARGE' ? "Sifariş çox böyükdür." : "JSON düzgün deyil.", error.message === 'PAYLOAD_TOO_LARGE' ? 413 : 400); }
-      const name = String(body.name || "").trim().slice(0, 100);
-      const phone = String(body.phone || "").trim().slice(0, 30);
-      const phoneDigits = phone.replace(/\D/g, '');
-      if (!name || phoneDigits.length < 7 || phoneDigits.length > 15 || !Array.isArray(body.cart) || !body.cart.length) return fail("Ad, telefon və məhsullar tələb olunur.");
-      if (body.cart.length > 100) return fail("Bir sifarişdə maksimum 100 fərqli məhsul ola bilər.");
+      const body = await r.json();
+      const name = String(body.name || "").trim(), phone = String(body.phone || "").trim();
+      if (!name || !phone || !Array.isArray(body.cart) || !body.cart.length) return fail("Ad, telefon və məhsullar tələb olunur.");
       const products = productList(await readState(e, owner.id));
       const cart = [];
-      const seen = new Map();
       for (const line of body.cart) {
-        const id = String(line?.id || '').slice(0, 200);
-        const rawQty = Number(line?.quantity);
-        const quantity = Number.isInteger(rawQty) ? rawQty : Math.floor(rawQty);
-        if (!id || !Number.isFinite(quantity) || quantity < 1 || quantity > 999) return fail("Məhsul sayı düzgün deyil.");
-        seen.set(id, Math.min(999, (seen.get(id) || 0) + quantity));
-      }
-      for (const [id, quantity] of seen) {
-        const product = products.find((x) => String(x.id) === id);
+        const product = products.find((x) => String(x.id) === String(line.id));
+        const quantity = Math.max(1, Number(line.quantity) || 1);
         if (!product) return fail("Məhsul tapılmadı.", 404);
-        cart.push({ ...product, price: Math.max(0, Number(product.price) || 0), quantity });
+        cart.push({ ...product, quantity });
       }
       const preferredAt = String(body.preferredAt || "").slice(0, 40);
       if (!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::\d{2})?$/.test(preferredAt)) return fail("Çatdırılma tarix və saatını 24 saat formatında yazın.");
       if (preferredAt.slice(0, 10) < new Date().toISOString().slice(0, 10)) return fail("Keçmiş tarix seçilə bilməz.");
       const delivery = String(body.delivery || "metro");
-      if (!['metro','address'].includes(delivery)) return fail("Çatdırılma üsulu düzgün deyil.");
-      const payment = String(body.payment || "cash");
-      if (!['cash','card'].includes(payment)) return fail("Ödəniş üsulu düzgün deyil.");
-      const preferredMs = Date.parse(preferredAt);
-      if (!Number.isFinite(preferredMs) || preferredMs > Date.now() + 366 * 86400000) return fail("Çatdırılma tarixi həddən artıq uzaqdır.");
       let deliveryFee = 0, deliveryDistanceKm = 0, deliveryPeriodLabel = "";
       let deliveryLat = null, deliveryLng = null;
       if (delivery === "address") {
@@ -1018,7 +694,7 @@ export default {
         deliveryFee = quote.fee; deliveryDistanceKm = quote.distanceKm; deliveryPeriodLabel = quote.periodLabel;
       }
       const subtotal = cart.reduce((s, x) => s + x.price * x.quantity, 0);
-      const order = { id: crypto.randomUUID(), customer: { name, phone, note: String(body.note || "").trim().slice(0, 500), delivery, metro: String(body.metro || "").trim().slice(0, 120), address: String(body.address || "").trim().slice(0, 300), payment, preferredAt, deliveryLat, deliveryLng }, cart, subtotal, deliveryFee, deliveryDistanceKm, deliveryPeriodLabel, total: subtotal + deliveryFee, createdAt: new Date().toISOString() };
+      const order = { id: crypto.randomUUID(), customer: { name, phone, note: String(body.note || "").slice(0, 500), delivery, metro: String(body.metro || ""), address: String(body.address || ""), payment: String(body.payment || "cash"), preferredAt, deliveryLat, deliveryLng }, cart, subtotal, deliveryFee, deliveryDistanceKm, deliveryPeriodLabel, total: subtotal + deliveryFee, createdAt: new Date().toISOString() };
       await e.DB.prepare("INSERT INTO customer_orders(id,owner_user_id,order_json,status) VALUES(?,?,?,?)").bind(order.id, owner.id, JSON.stringify(order), "new").run();
       await notification(e, owner.id, "customer-order", "Yeni müştəri sifarişi", `${name} · ${order.total.toFixed(2)} ₼`, { orderId: order.id });
       return json({ ok: true, orderId: order.id }, 201);
@@ -1030,10 +706,8 @@ export default {
     }
     if (p === "/api/ai-purchases/scan-all" && r.method === "POST") {
       if (!user) return fail("Giriş tələb olunur.", 401);
-      const rl = await checkRateLimit(r, e, "ai-scan-all", { limit: 6, windowSec: 3600, subject: user.id });
-      if (!rl.allowed) return rateLimited(rl);
       const payload=await aiPurchasePayload(e,user.id);
-      const enabled=payload.watches.filter(w=>w.enabled).slice(0,3);
+      const enabled=payload.watches.filter(w=>w.enabled).slice(0,5);
       const results=[];
       for(const w of enabled){ try{ results.push(await scanAiProduct(e,user.id,w.productId,{notify:true,sync:false})); }catch(err){ results.push({productId:w.productId,error:String(err?.message||err)}); } }
       return json({ok:true,scanned:results.length});
@@ -1041,19 +715,13 @@ export default {
     const aiScanMatch=p.match(/^\/api\/ai-purchases\/([^/]+)\/scan$/);
     if(aiScanMatch && r.method === "POST") {
       if (!user) return fail("Giriş tələb olunur.", 401);
-      const rl = await checkRateLimit(r, e, "ai-scan-one", { limit: 20, windowSec: 3600, subject: user.id });
-      if (!rl.allowed) return rateLimited(rl);
-      let productId; try { productId = decodeURIComponent(aiScanMatch[1]); } catch { return fail("Məhsul ID düzgün deyil."); }
-      if (!productId || productId.length > 200) return fail("Məhsul ID düzgün deyil.");
-      return json(await scanAiProduct(e,user.id,productId,{notify:true}));
+      return json(await scanAiProduct(e,user.id,decodeURIComponent(aiScanMatch[1]),{notify:true}));
     }
     const aiWatchMatch=p.match(/^\/api\/ai-purchases\/([^/]+)$/);
     if(aiWatchMatch && r.method === "PUT") {
       if (!user) return fail("Giriş tələb olunur.", 401);
       await ensureAiPurchaseSchema(e);
-      let id; try { id=decodeURIComponent(aiWatchMatch[1]); } catch { return fail('Məhsul ID düzgün deyil.'); }
-      if (!id || id.length > 200) return fail('Məhsul ID düzgün deyil.');
-      let body; try { body=await safeJson(r,5000); } catch { return fail('Ayar məlumatı düzgün deyil.'); }
+      const id=decodeURIComponent(aiWatchMatch[1]), body=await r.json();
       const enabled=body.enabled===undefined?1:(body.enabled?1:0);
       const threshold=clampNum(body.thresholdPct,0,90,8);
       const result=await e.DB.prepare('UPDATE ai_price_watch SET enabled=?,threshold_pct=?,updated_at=CURRENT_TIMESTAMP WHERE owner_user_id=? AND product_id=?').bind(enabled,threshold,user.id,id).run();
@@ -1068,7 +736,7 @@ export default {
       if (!user) return fail("Giriş tələb olunur.", 401);
       if (r.method === "GET") return json({ settings: await readStoreSettings(e, user.id) });
       if (r.method === "PUT") {
-        let body; try { body = await safeJson(r, 10000); } catch { return fail("Tarif məlumatı düzgün deyil."); }
+        const body = await r.json();
         const current = await readStoreSettings(e, user.id);
         const next = {
           originLat: clampNum(body.originLat, -90, 90, current.originLat),
@@ -1085,16 +753,16 @@ export default {
     }
     if (p === "/api/profile" && r.method === "PUT") {
       if (!user) return fail("Giriş tələb olunur.", 401);
-      let body; try { body = await safeJson(r, 20000); } catch { return fail("Profil məlumatı düzgün deyil."); }
+      const body = await r.json();
       const first = String(body.firstName || "").trim();
       const last = String(body.lastName || "").trim();
-      const username = String(body.username || "").trim().toLowerCase();
+      const username = String(body.username || "").trim();
       const currentPassword = String(body.currentPassword || "");
       const newPassword = String(body.newPassword || "");
-      if (!first || !last || first.length > 80 || last.length > 80 || !/^[a-z0-9_.-]{3,30}$/i.test(username))
+      if (!first || !last || !/^[\w.-]{3,30}$/.test(username))
         return fail("Ad, soyad və username düzgün yazılmalıdır.");
       const other = await e.DB.prepare(
-        "SELECT id FROM users WHERE username=? COLLATE NOCASE AND id<>?",
+        "SELECT id FROM users WHERE username=? AND id<>?",
       )
         .bind(username, user.id)
         .first();
@@ -1103,9 +771,9 @@ export default {
       if (newPassword) {
         if (!/^\d{4}$/.test(newPassword))
           return fail("Yeni şifrə 4 rəqəm olmalıdır.");
-        if (!(await verifyPassword(currentPassword, user.salt, user.password_hash)))
+        if ((await hash(currentPassword, user.salt)) !== user.password_hash)
           return fail("Hazırkı şifrə yanlışdır.", 401);
-        passwordHash = await hashPassword(newPassword, user.salt);
+        passwordHash = await hash(newPassword, user.salt);
       }
       await e.DB.prepare(
         "UPDATE users SET username=?,first_name=?,last_name=?,password_hash=? WHERE id=?",
@@ -1119,15 +787,14 @@ export default {
         last_name: last,
         password_hash: passwordHash,
       };
-      const token = await issue(updated, e.AUTH_SECRET);
-      return json({ user: pub(updated) }, 200, { "set-cookie": sessionCookie(token) });
+      return json({ token: await issue(updated, e.AUTH_SECRET), user: pub(updated) });
     }
     if (p === "/api/state") {
       if (!user) return fail("Giriş tələb olunur.", 401);
       if (r.method === "GET") return json({ state: await readState(e, user.id) });
       if (r.method === "PUT") {
         let body;
-        try { body = await safeJson(r, 8_500_000); } catch (error) { return fail(error.message === 'PAYLOAD_TOO_LARGE' ? "Məlumat ölçüsü çox böyükdür." : "JSON düzgün deyil.", error.message === 'PAYLOAD_TOO_LARGE' ? 413 : 400); }
+        try { body = await r.json(); } catch { return fail("JSON düzgün deyil."); }
         const state = body?.state;
         const validationError = validateState(state);
         if (validationError) return fail(validationError);
@@ -1142,25 +809,22 @@ export default {
     if (p === "/api/customer-orders" && r.method === "GET") {
       if (!user) return fail("Giriş tələb olunur.", 401);
       const rows = await e.DB.prepare("SELECT id,order_json,status,created_at,updated_at FROM customer_orders WHERE owner_user_id=? ORDER BY created_at DESC").bind(user.id).all();
-      const orders = (rows.results || []).map((row) => { const parsed = safeParseJson(row.order_json); return parsed ? { ...parsed, status: row.status, createdAt: row.created_at, updatedAt: row.updated_at } : null; }).filter(Boolean);
-      return json({ orders });
+      return json({ orders: (rows.results || []).map((row) => ({ ...JSON.parse(row.order_json), status: row.status, createdAt: row.created_at, updatedAt: row.updated_at })) });
     }
     if (p === "/api/notifications" && r.method === "GET") {
       if (!user) return fail("Giriş tələb olunur.", 401);
       await ensureNotifications(e);
       const rows = await e.DB.prepare("SELECT id,kind,title,body,data_json,is_read,created_at FROM notifications WHERE owner_user_id=? ORDER BY created_at DESC LIMIT 100").bind(user.id).all();
-      return json({ notifications: (rows.results || []).map((row) => ({ id: row.id, kind: row.kind, title: row.title, body: row.body, data: row.data_json ? safeParseJson(row.data_json) : null, read: Boolean(row.is_read), createdAt: row.created_at })) });
+      return json({ notifications: (rows.results || []).map((row) => ({ id: row.id, kind: row.kind, title: row.title, body: row.body, data: row.data_json ? JSON.parse(row.data_json) : null, read: Boolean(row.is_read), createdAt: row.created_at })) });
     }
     if (p === "/api/notifications" && r.method === "POST") {
       if (!user) return fail("Giriş tələb olunur.", 401);
-      const rl = await checkRateLimit(r, e, "notification-send", { limit: 20, windowSec: 3600, subject: user.id });
-      if (!rl.allowed) return rateLimited(rl);
-      let body; try { body = await safeJson(r, 5000); } catch { return fail("Bildiriş məlumatı düzgün deyil."); }
-      const username = String(body.username || "").trim().toLowerCase();
+      const body = await r.json();
+      const username = String(body.username || "").trim();
       const title = String(body.title || "Bildiriş").trim().slice(0, 100);
       const message = String(body.message || "").trim().slice(0, 500);
       if (!username || !message) return fail("Username və bildiriş mətni tələb olunur.");
-      const recipient = await e.DB.prepare("SELECT id FROM users WHERE username=? COLLATE NOCASE").bind(username).first();
+      const recipient = await e.DB.prepare("SELECT id FROM users WHERE username=?").bind(username).first();
       if (!recipient) return fail("Bu username ilə istifadəçi tapılmadı.", 404);
       await notification(e, recipient.id, "message", title, message, { from: user.username });
       return json({ ok: true });
@@ -1191,14 +855,12 @@ export default {
     }
     if (customerMatch && r.method === "PUT") {
       if (!user) return fail("Giriş tələb olunur.", 401);
-      let body; try { body = await safeJson(r, 20000); } catch { return fail("Sifariş məlumatı düzgün deyil."); }
+      const body = await r.json();
       const status = String(body.status || "new");
       if (!['new','confirmed','preparing','courier','delivered','cancelled'].includes(status)) return fail("Status düzgün deyil.");
       const row = await e.DB.prepare("SELECT order_json,status FROM customer_orders WHERE id=? AND owner_user_id=?").bind(customerMatch[1], user.id).first();
       if (!row) return fail("Sifariş tapılmadı.", 404);
-      const order = safeParseJson(row.order_json);
-      if (!order) return fail("Sifariş məlumatı oxunmadı.", 500);
-      if (["delivered","cancelled"].includes(row.status) && status !== row.status) return fail("Tamamlanmış və ya ləğv edilmiş sifarişin statusu dəyişdirilə bilməz.", 409);
+      const order = JSON.parse(row.order_json);
       if (body.customer && typeof body.customer === "object") {
         const next = body.customer;
         order.customer = {
@@ -1215,7 +877,7 @@ export default {
         if (!order.customer.name || !order.customer.phone)
           return fail("Müştərinin adı və telefonu tələb olunur.");
       }
-      if (status === 'delivered' && row.status !== 'delivered' && !order.inventoryAppliedAt) {
+      if (status === 'delivered' && row.status !== 'delivered') {
         const state = await readState(e, user.id);
         state.customerSales = Array.isArray(state.customerSales) ? state.customerSales : [];
         for (const line of order.cart || []) {
@@ -1236,28 +898,15 @@ export default {
           }
         }
         await e.DB.prepare("UPDATE user_state SET state_json=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?").bind(JSON.stringify(state), user.id).run();
-        order.inventoryAppliedAt = new Date().toISOString();
       }
       await e.DB.prepare("UPDATE customer_orders SET order_json=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND owner_user_id=?").bind(JSON.stringify(order), status, customerMatch[1], user.id).run();
       const messageSent = status !== row.status ? await sendWhatsAppStatus(e, order, status).catch(() => false) : false;
       if (status !== row.status) await notification(e, user.id, "order-status", `Sifariş statusu: ${whatsappStatuses[status] || status}`, `${order.customer?.name || "Müştəri"} · ${order.total?.toFixed?.(2) || order.total || 0} ₼`, { orderId: customerMatch[1], status });
       return json({ ok: true, messageSent, whatsappUrl: whatsappUrl(order, status), order: { ...order, status } });
     }
-    const asset = await e.ASSETS.fetch(r);
-    const headers = new Headers(asset.headers);
-    const type = headers.get("content-type") || "";
-    applySecurityHeaders(headers, { html: type.includes("text/html") });
-    if (type.includes("text/html")) headers.set("cache-control", "no-cache");
-    return new Response(asset.body, { status: asset.status, statusText: asset.statusText, headers });
+    return e.ASSETS.fetch(r);
   },
   async scheduled(event, e, ctx) {
-    ctx.waitUntil((async () => {
-      await scanAllAiWatches(e);
-      try {
-        await ensureSecuritySchema(e);
-        const cutoff = Math.floor(Date.now()/1000) - 172800;
-        await e.DB.prepare("DELETE FROM security_rate_limits WHERE updated_at<?").bind(cutoff).run();
-      } catch {}
-    })());
+    ctx.waitUntil(scanAllAiWatches(e));
   },
 };

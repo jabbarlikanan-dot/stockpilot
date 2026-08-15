@@ -1,5 +1,6 @@
 (() => {
-  const request = (path, options = {}) => fetch(path, { ...options, credentials: "same-origin", headers: { ...(options.headers || {}) } });
+  const token = localStorage.stockpilotToken;
+  const request = (path, options = {}) => fetch(path, { ...options, headers: { Authorization: `Bearer ${token}`, ...(options.headers || {}) } });
   const esc = (value) => String(value || "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[m]));
   const formatDate = (value) => new Intl.DateTimeFormat("az-AZ", { dateStyle: "medium", timeStyle: "short", hour12: false }).format(new Date(value));
   const sender = (item) => item.data?.from ? `Göndərən: ${item.data.from}` : item.kind === "customer-order" ? "Mənbə: Mağaza sifarişi" : item.kind === "order-status" ? "Mənbə: Sifariş sistemi" : item.kind === "ai-price" ? "Mənbə: AI Alış Köməkçisi" : "Mənbə: StockPilot";
@@ -55,6 +56,7 @@
   }
 
   async function load() {
+    if (!token) return;
     const response = await request("/api/notifications");
     if (!response.ok) return;
     list = (await response.json()).notifications || [];

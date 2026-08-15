@@ -1,4 +1,13 @@
-const api = (path, options = {}) => fetch(path, { ...options, credentials: "same-origin", headers: { ...(options.headers || {}) } });
+const api = (path, options = {}) =>
+  fetch(path, {
+    ...options,
+    headers: {
+      ...(options.headers || {}),
+      ...(localStorage.stockpilotToken
+        ? { Authorization: `Bearer ${localStorage.stockpilotToken}` }
+        : {}),
+    },
+  });
 
 function message(form, text) {
   form.querySelector(".msg").textContent = text;
@@ -53,8 +62,8 @@ async function login(event) {
       body: JSON.stringify(body),
     });
     const data = await readResponse(response);
-    if (response.ok) {
-      localStorage.removeItem("stockpilotToken");
+    if (response.ok && data.token) {
+      localStorage.stockpilotToken = data.token;
       return (location.href = "dashboard.html");
     }
     return message(form, data.error || "Məlumatlar yanlışdır.");
@@ -85,12 +94,11 @@ async function register(event) {
   try {
     const response = await fetch("/api/register", {
       method: "POST",
-      credentials: "same-origin",
       body: data,
     });
     const result = await readResponse(response);
-    if (response.ok) {
-      localStorage.removeItem("stockpilotToken");
+    if (response.ok && result.token) {
+      localStorage.stockpilotToken = result.token;
       return (location.href = "dashboard.html");
     }
     return message(
