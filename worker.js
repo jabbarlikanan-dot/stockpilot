@@ -61,8 +61,17 @@ async function verifyPassword(password, salt, stored) {
     const iterations = Math.min(600000, Math.max(100000, Number(match[1]) || 210000));
     return constantTimeEqual(await deriveHash(password, salt, iterations), match[2]);
   }
-  // Legacy v38 və əvvəlki hesablar: uğurlu girişdən sonra yeni formata yüksəldilir.
-  return constantTimeEqual(await deriveHash(password, salt, 100000), value);
+  // Legacy StockPilot accounts used raw PBKDF2-SHA256 output with 100k iterations.
+  if (/^[A-Za-z0-9+/]{43}=$/.test(value) || /^[A-Za-z0-9+/]{44}$/.test(value)) {
+    if (constantTimeEqual(await deriveHash(password, salt, 100000), value)) return true;
+    // Some transitional builds wrote the newer iteration count without the prefix.
+    if (constantTimeEqual(await deriveHash(password, salt, 210000), value)) return true;
+    return false;
+  }
+  // Very early local builds may have stored a literal 4-digit PIN. Accept only this exact
+  // legacy shape once, then immediately migrate it to PBKDF2 after successful login.
+  if (/^\d{4}$/.test(value)) return constantTimeEqual(password, value);
+  return false;
 }
 async function mac(x, secret) {
   const key = await crypto.subtle.importKey("raw", enc.encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
@@ -128,15 +137,23 @@ function validRequestOrigin(request) {
   if (!origin) return true;
   try { return origin === new URL(request.url).origin; } catch { return false; }
 }
+const safeLegacyPhoto = (value) => {
+  const text = String(value || "");
+  return /^data:image\/(?:png|jpeg|webp);base64,/i.test(text) && text.length <= 2_500_000 ? text : null;
+};
 const pub = (u) => ({
   id: u.id,
   username: u.username,
   firstName: u.first_name,
   lastName: u.last_name,
-  photo: u.photo_key ? `/api/images/${u.photo_key}` : null,
+  photo: u.photo_key ? `/api/images/${u.photo_key}` : safeLegacyPhoto(u.photo_text),
 });
 
 let authSchemaReady;
+async function userColumns(e) {
+  const result = await e.DB.prepare("PRAGMA table_info(users)").all();
+  return new Set((result.results || []).map((row) => String(row.name || "")));
+}
 function ensureAuthSchema(e) {
   if (!authSchemaReady) {
     authSchemaReady = (async () => {
@@ -150,11 +167,27 @@ function ensureAuthSchema(e) {
         photo_key TEXT,
         created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       )`).run();
+
+      // Existing deployments may use the old `photo_text` column. CREATE TABLE IF NOT EXISTS
+      // does not migrate an existing table, so add modern columns in-place without deleting data.
+      let columns = await userColumns(e);
+      if (!columns.has("photo_key")) {
+        await e.DB.prepare("ALTER TABLE users ADD COLUMN photo_key TEXT").run();
+        columns = await userColumns(e);
+      }
+      if (!columns.has("created_at")) {
+        await e.DB.prepare("ALTER TABLE users ADD COLUMN created_at TEXT").run();
+        await e.DB.prepare("UPDATE users SET created_at=CURRENT_TIMESTAMP WHERE created_at IS NULL OR created_at='' ").run();
+      }
+
       await e.DB.prepare(`CREATE TABLE IF NOT EXISTS user_state (
         user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
         state_json TEXT NOT NULL,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       )`).run();
+
+      // Case-insensitive lookup index for legacy tables that were created without COLLATE NOCASE.
+      try { await e.DB.prepare("CREATE INDEX IF NOT EXISTS idx_users_username_nocase ON users(username COLLATE NOCASE)").run(); } catch {}
       return true;
     })().catch((error) => { authSchemaReady = null; throw error; });
   }
@@ -833,12 +866,14 @@ export default {
       const id = crypto.randomUUID(), salt = b64(crypto.getRandomValues(new Uint8Array(16)));
       let key = null, file = f.get("photo");
       if (file && typeof file !== "string" && file.size) {
-        if (!e.IMAGES) return fail("Profil şəkli hazırda aktiv deyil. Şəkilsiz qeydiyyatdan keçin.");
         if (file.size > 4_000_000) return fail("Şəkil maksimum 4MB olmalıdır.");
         const type = String(file.type || "").toLowerCase();
         if (!["image/jpeg","image/png","image/webp"].includes(type)) return fail("Yalnız JPG, PNG və WEBP şəkilləri qəbul olunur.");
-        key = `profiles/${id}/${crypto.randomUUID()}`;
-        await e.IMAGES.put(key, file.stream(), { httpMetadata: { contentType: type } });
+        // Photo is optional. Deployments without an IMAGES/R2 binding must still be able to register.
+        if (e.IMAGES) {
+          key = `profiles/${id}/${crypto.randomUUID()}`;
+          await e.IMAGES.put(key, file.stream(), { httpMetadata: { contentType: type } });
+        }
       }
       const passwordHash = await hashPassword(password, salt);
       try {
@@ -852,6 +887,7 @@ export default {
         console.error("register database write failed", error);
         const text = String(error?.message || error || "");
         if (/unique|constraint/i.test(text)) return fail("Username artıq istifadə olunur.", 409);
+        if (/no such column|table.*has no column/i.test(text)) return fail("Hesab bazası köhnə sxemdədir. Worker-i yenidən deploy edin və bir dəfə yenidən cəhd edin.", 500);
         return fail("Hesab database-ə yazılmadı. Yenidən cəhd edin.", 500);
       }
       const user = { id, username, first_name: first, last_name: last, photo_key: key };
