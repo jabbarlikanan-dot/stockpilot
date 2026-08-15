@@ -34,6 +34,17 @@
         <a id="returnStore" class="return-store" href="store.html">Mağazaya qayıt</a>
       </section>
     </main>
-    <script src="order-success.js"></script>
+    <script>
+      const params = new URLSearchParams(location.search);
+      const shop = params.get('shop') || '';
+      const orderId = params.get('id') || '';
+      const trackUrl = new URL('order-track.html', location.href);
+      trackUrl.searchParams.set('shop', shop);
+      trackUrl.searchParams.set('id', orderId);
+      document.getElementById('returnStore').href = `store.html?shop=${encodeURIComponent(shop)}`;
+      document.getElementById('trackOrder').href = trackUrl.href;
+      document.getElementById('orderRef').textContent = orderId ? `#${orderId.slice(0, 8).toUpperCase()}` : '—';
+      document.getElementById('trackingQr').src = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=10&data=${encodeURIComponent(trackUrl.href)}`;
+    </script>
   </body>
 </html>

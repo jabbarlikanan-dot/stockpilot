@@ -135,6 +135,31 @@ const pub = (u) => ({
   lastName: u.last_name,
   photo: u.photo_key ? `/api/images/${u.photo_key}` : null,
 });
+
+let authSchemaReady;
+function ensureAuthSchema(e) {
+  if (!authSchemaReady) {
+    authSchemaReady = (async () => {
+      await e.DB.prepare(`CREATE TABLE IF NOT EXISTS users (
+        id TEXT PRIMARY KEY,
+        username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+        first_name TEXT NOT NULL,
+        last_name TEXT NOT NULL,
+        password_hash TEXT NOT NULL,
+        salt TEXT NOT NULL,
+        photo_key TEXT,
+        created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )`).run();
+      await e.DB.prepare(`CREATE TABLE IF NOT EXISTS user_state (
+        user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+        state_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )`).run();
+      return true;
+    })().catch((error) => { authSchemaReady = null; throw error; });
+  }
+  return authSchemaReady;
+}
 const readState = async (e, id) => {
   const row = await e.DB.prepare("SELECT state_json FROM user_state WHERE user_id=?").bind(id).first();
   if (!row?.state_json) return { orders: [], customerSales: [] };
@@ -786,6 +811,10 @@ export default {
       return new Response(o.body, { headers });
     }
     if (p === "/api/register" && r.method === "POST") {
+      try { await ensureAuthSchema(e); } catch (error) {
+        console.error("auth schema init failed", error);
+        return fail("Hesab bazası hazırlanmadı. Deploy zamanı D1 bağlantısını yoxlayın.", 500);
+      }
       const rl = await checkRateLimit(r, e, "register", { limit: 5, windowSec: 3600 });
       if (!rl.allowed) return rateLimited(rl);
       const length = Number(r.headers.get("content-length"));
@@ -799,7 +828,7 @@ export default {
       if (!/^[a-z0-9_.-]{3,30}$/i.test(username) || !first || !last || first.length > 80 || last.length > 80)
         return fail("Bütün məlumatları düzgün yazın.");
       if (!/^\d{4}$/.test(password)) return fail("Şifrə 4 rəqəm olmalıdır.");
-      if (await e.DB.prepare("SELECT id FROM users WHERE username=?").bind(username).first())
+      if (await e.DB.prepare("SELECT id FROM users WHERE username=? COLLATE NOCASE").bind(username).first())
         return fail("Username artıq istifadə olunur.", 409);
       const id = crypto.randomUUID(), salt = b64(crypto.getRandomValues(new Uint8Array(16)));
       let key = null, file = f.get("photo");
@@ -812,21 +841,37 @@ export default {
         await e.IMAGES.put(key, file.stream(), { httpMetadata: { contentType: type } });
       }
       const passwordHash = await hashPassword(password, salt);
-      await e.DB.prepare("INSERT INTO users(id,username,first_name,last_name,password_hash,salt,photo_key) VALUES(?,?,?,?,?,?,?)")
-        .bind(id, username, first, last, passwordHash, salt, key).run();
-      await e.DB.prepare("INSERT INTO user_state(user_id,state_json) VALUES(?,?)").bind(id, '{"orders":[],"customerSales":[]}').run();
+      try {
+        await e.DB.batch([
+          e.DB.prepare("INSERT INTO users(id,username,first_name,last_name,password_hash,salt,photo_key) VALUES(?,?,?,?,?,?,?)")
+            .bind(id, username, first, last, passwordHash, salt, key),
+          e.DB.prepare("INSERT INTO user_state(user_id,state_json) VALUES(?,?)")
+            .bind(id, '{"orders":[],"customerSales":[]}'),
+        ]);
+      } catch (error) {
+        console.error("register database write failed", error);
+        const text = String(error?.message || error || "");
+        if (/unique|constraint/i.test(text)) return fail("Username artıq istifadə olunur.", 409);
+        return fail("Hesab database-ə yazılmadı. Yenidən cəhd edin.", 500);
+      }
       const user = { id, username, first_name: first, last_name: last, photo_key: key };
       const token = await issue(user, e.AUTH_SECRET);
       return json({ user: pub(user) }, 201, { "set-cookie": sessionCookie(token) });
     }
     if (p === "/api/login" && r.method === "POST") {
+      try { await ensureAuthSchema(e); } catch (error) {
+        console.error("auth schema init failed", error);
+        return fail("Hesab bazası hazırlanmadı. D1 bağlantısını yoxlayın.", 500);
+      }
       let body;
       try { body = await safeJson(r, 5000); } catch (error) { return fail(error.message === 'PAYLOAD_TOO_LARGE' ? "Sorğu çox böyükdür." : "JSON düzgün deyil.", error.message === 'PAYLOAD_TOO_LARGE' ? 413 : 400); }
       const username = String(body.username || "").trim().toLowerCase();
       const password = String(body.password || "");
       const rl = await checkRateLimit(r, e, "login", { limit: 12, windowSec: 900, subject: username.slice(0, 50) });
       if (!rl.allowed) return rateLimited(rl);
-      const user = await e.DB.prepare("SELECT * FROM users WHERE username=?").bind(username).first();
+      // Legacy D1 databases may have been created before users.username had COLLATE NOCASE.
+      // Explicit COLLATE NOCASE keeps old mixed-case usernames login-compatible.
+      const user = await e.DB.prepare("SELECT * FROM users WHERE username=? COLLATE NOCASE").bind(username).first();
       let valid = false;
       if (user && /^\d{4}$/.test(password)) valid = await verifyPassword(password, user.salt, user.password_hash);
       else if (/^\d{4}$/.test(password)) await deriveHash(password, b64(new Uint8Array(16)), 100000);
@@ -842,7 +887,7 @@ export default {
     if (p === "/api/logout" && r.method === "POST") return json({ ok: true }, 200, { "set-cookie": clearSessionCookie() });
     const storeMatch = p.match(/^\/api\/store\/([\w.-]{3,30})$/);
     if (storeMatch && r.method === "GET") {
-      const owner = await e.DB.prepare("SELECT * FROM users WHERE username=?").bind(storeMatch[1]).first();
+      const owner = await e.DB.prepare("SELECT * FROM users WHERE username=? COLLATE NOCASE").bind(storeMatch[1]).first();
       if (!owner) return fail("Mağaza tapılmadı.", 404);
       const state = await readState(e, owner.id);
       const reserved = await reservedStock(e, owner.id);
@@ -855,7 +900,7 @@ export default {
     if (storeQuoteMatch && r.method === "POST") {
       const rl = await checkRateLimit(r, e, "delivery-quote", { limit: 60, windowSec: 600, subject: storeQuoteMatch[1] });
       if (!rl.allowed) return rateLimited(rl);
-      const owner = await e.DB.prepare("SELECT id FROM users WHERE username=?").bind(storeQuoteMatch[1]).first();
+      const owner = await e.DB.prepare("SELECT id FROM users WHERE username=? COLLATE NOCASE").bind(storeQuoteMatch[1]).first();
       if (!owner) return fail("Mağaza tapılmadı.", 404);
       let body; try { body = await safeJson(r, 10000); } catch { return fail("Sorğu düzgün deyil."); }
       const lat = Number(body.lat), lng = Number(body.lng), preferredAt = String(body.preferredAt || "");
@@ -867,7 +912,7 @@ export default {
     if (storeTrackMatch && r.method === "GET") {
       const rl = await checkRateLimit(r, e, "order-track", { limit: 120, windowSec: 600, subject: storeTrackMatch[1] });
       if (!rl.allowed) return rateLimited(rl);
-      const owner = await e.DB.prepare("SELECT id FROM users WHERE username=?").bind(storeTrackMatch[1]).first();
+      const owner = await e.DB.prepare("SELECT id FROM users WHERE username=? COLLATE NOCASE").bind(storeTrackMatch[1]).first();
       if (!owner) return fail("Mağaza tapılmadı.", 404);
       const row = await e.DB.prepare("SELECT order_json,status FROM customer_orders WHERE id=? AND owner_user_id=?").bind(storeTrackMatch[2], owner.id).first();
       if (!row) return fail("Sifariş tapılmadı.", 404);
@@ -896,7 +941,7 @@ export default {
     if (storeOrderMatch && r.method === "POST") {
       const rl = await checkRateLimit(r, e, "store-order", { limit: 20, windowSec: 600, subject: storeOrderMatch[1] });
       if (!rl.allowed) return rateLimited(rl);
-      const owner = await e.DB.prepare("SELECT * FROM users WHERE username=?").bind(storeOrderMatch[1]).first();
+      const owner = await e.DB.prepare("SELECT * FROM users WHERE username=? COLLATE NOCASE").bind(storeOrderMatch[1]).first();
       if (!owner) return fail("Mağaza tapılmadı.", 404);
       let body; try { body = await safeJson(r, 100000); } catch (error) { return fail(error.message === 'PAYLOAD_TOO_LARGE' ? "Sifariş çox böyükdür." : "JSON düzgün deyil.", error.message === 'PAYLOAD_TOO_LARGE' ? 413 : 400); }
       const name = String(body.name || "").trim().slice(0, 100);
@@ -1013,7 +1058,7 @@ export default {
       if (!first || !last || first.length > 80 || last.length > 80 || !/^[a-z0-9_.-]{3,30}$/i.test(username))
         return fail("Ad, soyad və username düzgün yazılmalıdır.");
       const other = await e.DB.prepare(
-        "SELECT id FROM users WHERE username=? AND id<>?",
+        "SELECT id FROM users WHERE username=? COLLATE NOCASE AND id<>?",
       )
         .bind(username, user.id)
         .first();
@@ -1079,7 +1124,7 @@ export default {
       const title = String(body.title || "Bildiriş").trim().slice(0, 100);
       const message = String(body.message || "").trim().slice(0, 500);
       if (!username || !message) return fail("Username və bildiriş mətni tələb olunur.");
-      const recipient = await e.DB.prepare("SELECT id FROM users WHERE username=?").bind(username).first();
+      const recipient = await e.DB.prepare("SELECT id FROM users WHERE username=? COLLATE NOCASE").bind(username).first();
       if (!recipient) return fail("Bu username ilə istifadəçi tapılmadı.", 404);
       await notification(e, recipient.id, "message", title, message, { from: user.username });
       return json({ ok: true });

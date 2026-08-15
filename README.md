@@ -51,7 +51,3 @@ Template body-sində iki dəyişən olmalıdır: `{{1}}` müştərinin adı, `{{
 - **Məhsul idarəetməsi:** kateqoriya, qısa qeyd, axtarış, satılan/satılmayan filteri, silinən məhsulu geri qaytarma, Excel import/export.
 
 Bu səhifələrin hamısı eyni `username`-in D1-dəki şəxsi məlumatlarını oxuyur; başqa user-lərin sifarişləri görünmür.
-
-## Security deployment note (v39)
-
-Production deploy-da `AUTH_SECRET` mütləq Cloudflare secret kimi təyin olunmalıdır (`wrangler secret put AUTH_SECRET`). Yeni auth sessiyası HttpOnly/Secure/SameSite cookie istifadə edir; localStorage token artıq yeni sessiyalarda istifadə olunmur. Ətraflı audit üçün `V39-SECURITY-BUGFIX-AUDIT.md` faylına baxın.

@@ -85,6 +85,7 @@ async function register(event) {
   try {
     const response = await fetch("/api/register", {
       method: "POST",
+      credentials: "same-origin",
       body: data,
     });
     const result = await readResponse(response);
