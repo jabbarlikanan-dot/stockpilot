@@ -286,8 +286,10 @@ async function sendWhatsAppStatus(e, order, status) {
 let aiPurchaseSchemaReady;
 function ensureAiPurchaseSchema(e) {
   if (!aiPurchaseSchemaReady) {
-    aiPurchaseSchemaReady = Promise.all([
-      e.DB.prepare(`CREATE TABLE IF NOT EXISTS ai_price_watch (
+    aiPurchaseSchemaReady = (async () => {
+      // D1 migration-ları ardıcıl işləyir: əvvəl cədvəllər, sonra indekslər.
+      // Əvvəlki Promise.all yanaşması indeksin cədvəldən tez işləməsinə və 500 xətasına səbəb ola bilərdi.
+      await e.DB.prepare(`CREATE TABLE IF NOT EXISTS ai_price_watch (
         owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         product_id TEXT NOT NULL,
         product_name TEXT NOT NULL,
@@ -305,8 +307,8 @@ function ensureAiPurchaseSchema(e) {
         best_source TEXT,
         updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY(owner_user_id, product_id)
-      )`).run(),
-      e.DB.prepare(`CREATE TABLE IF NOT EXISTS ai_price_offers (
+      )`).run();
+      await e.DB.prepare(`CREATE TABLE IF NOT EXISTS ai_price_offers (
         id TEXT PRIMARY KEY,
         owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         product_id TEXT NOT NULL,
@@ -319,10 +321,14 @@ function ensureAiPurchaseSchema(e) {
         currency TEXT NOT NULL DEFAULT 'AZN',
         raw_price REAL NOT NULL DEFAULT 0,
         found_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-      )`).run(),
-      e.DB.prepare("CREATE INDEX IF NOT EXISTS idx_ai_watch_owner ON ai_price_watch(owner_user_id,enabled,updated_at)").run(),
-      e.DB.prepare("CREATE INDEX IF NOT EXISTS idx_ai_offer_product ON ai_price_offers(owner_user_id,product_id,total_azn,found_at DESC)").run(),
-    ]);
+      )`).run();
+      await e.DB.prepare("CREATE INDEX IF NOT EXISTS idx_ai_watch_owner ON ai_price_watch(owner_user_id,enabled,updated_at)").run();
+      await e.DB.prepare("CREATE INDEX IF NOT EXISTS idx_ai_offer_product ON ai_price_offers(owner_user_id,product_id,total_azn,found_at DESC)").run();
+      return true;
+    })().catch((error) => {
+      aiPurchaseSchemaReady = null;
+      throw error;
+    });
   }
   return aiPurchaseSchemaReady;
 }
@@ -397,6 +403,48 @@ async function duckSearch(query) {
   }
   return results;
 }
+async function bingSearch(query) {
+  try {
+    const url=`https://www.bing.com/search?q=${encodeURIComponent(query)}&setlang=en-US`;
+    const res=await fetch(url,{headers:{'user-agent':'Mozilla/5.0 StockPilotPriceMonitor/1.0','accept-language':'en-US,en;q=0.8'}});
+    if(!res.ok) return [];
+    const html=await res.text();
+    const out=[];
+    const re=/<li[^>]+class=["'][^"']*b_algo[^"']*["'][\s\S]*?<h2>\s*<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    let m;
+    while((m=re.exec(html))&&out.length<8){
+      const u=safeExternalUrl(m[1]); if(!u||u.hostname.includes('bing.com')) continue;
+      out.push({url:u.href,title:decodeHtml(m[2]),source:u.hostname.replace(/^www\./,'')});
+    }
+    return out;
+  } catch { return []; }
+}
+function normalizeProductQuery(name='') {
+  return String(name).replace(/[|]/g,' ').replace(/\s+/g,' ').trim();
+}
+async function multiPriceSearch(productName, countryName='') {
+  const name=normalizeProductQuery(productName);
+  const queries=[
+    `${name} price buy`,
+    `"${name}" shop price`,
+    `${name} ${countryName} price`,
+    `site:iherb.com ${name}`,
+    `site:amazon.com ${name}`,
+    `site:walmart.com ${name}`,
+    `site:trendyol.com ${name}`,
+  ];
+  const merged=[];
+  for(const q of queries.slice(0,5)){
+    const [a,b]=await Promise.all([duckSearch(q),bingSearch(q)]);
+    merged.push(...a,...b);
+    if(merged.length>=18) break;
+  }
+  const seen=new Set();
+  return merged.filter(r=>{
+    try { const u=new URL(r.url); const key=`${u.hostname}${u.pathname}`.replace(/\/$/,''); if(seen.has(key))return false; seen.add(key); return true; }
+    catch{return false}
+  }).slice(0,18);
+}
 function priceCandidates(html) {
   const out=[];
   const push=(raw,currency='')=>{ const n=Number(String(raw).replace(/\s/g,'').replace(/,(?=\d{3}\b)/g,'').replace(',','.').replace(/[^0-9.]/g,'')); if(Number.isFinite(n)&&n>0&&n<100000) out.push({raw:n,currency}); };
@@ -455,10 +503,9 @@ async function scanAiProduct(e, ownerId, productId, {notify=true,sync=true}={}) 
   const watch=await e.DB.prepare('SELECT * FROM ai_price_watch WHERE owner_user_id=? AND product_id=?').bind(ownerId,productId).first();
   if(!watch) return { error:'Məhsul izləmədə tapılmadı.' };
   const country=aiCountry(state,watch.country_key);
-  const query=`${watch.product_name} ${country.name||''} buy price`;
-  const results=await duckSearch(query);
+  const results=await multiPriceSearch(watch.product_name,country.name||'');
   const offers=[];
-  for(const result of results.slice(0,5)){ const offer=await offerFromPage(result,state,watch); if(offer) offers.push(offer); }
+  for(const result of results.slice(0,9)){ const offer=await offerFromPage(result,state,watch); if(offer) offers.push(offer); }
   offers.sort((a,b)=>a.totalAzn-b.totalAzn);
   await e.DB.prepare('DELETE FROM ai_price_offers WHERE owner_user_id=? AND product_id=?').bind(ownerId,productId).run();
   for(const o of offers.slice(0,5)){ await e.DB.prepare(`INSERT INTO ai_price_offers(id,owner_user_id,product_id,title,url,source,product_price_azn,shipping_azn,total_azn,currency,raw_price) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).bind(crypto.randomUUID(),ownerId,productId,String(o.title).slice(0,300),String(o.url).slice(0,1500),String(o.source).slice(0,150),o.productPriceAzn,o.shippingAzn,o.totalAzn,o.currency,o.rawPrice).run(); }

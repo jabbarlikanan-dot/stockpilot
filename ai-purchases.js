@@ -18,7 +18,7 @@ async function load(){
   document.getElementById('profileName').textContent=`${user.firstName||''} ${user.lastName||''}`.trim();
   const store=`store.html?shop=${encodeURIComponent(user.username)}`;
   document.getElementById('storeLink').href=store;document.getElementById('mobileStoreLink').href=store;
-  if(!res.ok){setStatus('AI alış məlumatı yüklənmədi.','error');return}
+  if(!res.ok){const err=await res.json().catch(()=>({}));setStatus(`${err.error||'AI alış məlumatı yüklənmədi.'} Səhifəni yenidən yoxlamaq üçün “Hamısını yoxla” düyməsini istifadə edə bilərsiniz.`,'error');document.getElementById('watchList').innerHTML='<div class="ai-empty"><b>Monitor məlumatı açıla bilmədi</b><br><small>Worker yeniləndikdən sonra səhifəni yeniləyin.</small></div>';return}
   payload=await res.json();render();setStatus('');
 }
 function render(){
