@@ -125,13 +125,15 @@ const defaultStoreSettings = {
   originLat: 40.4093,
   originLng: 49.8671,
   originLabel: "Bakı mərkəz",
-  baseFee: 2.5,
-  perKm: 0.75,
-  minFee: 3.5,
-  morningMultiplier: 1.15,
-  eveningMultiplier: 1.25,
-  nightMultiplier: 1.20,
-  weekendMultiplier: 1.10,
+  // Bakı ride-hailing bazarına uyğun yumşaq default model.
+  // Minimum 5 ₼, məsafə artımı isə əvvəlki versiyadan xeyli aşağıdır.
+  baseFee: 3.2,
+  perKm: 0.32,
+  minFee: 5,
+  morningMultiplier: 1.08,
+  eveningMultiplier: 1.12,
+  nightMultiplier: 1.08,
+  weekendMultiplier: 1.05,
 };
 let storeSettingsSchemaReady;
 function ensureStoreSettings(e) {
@@ -141,13 +143,13 @@ function ensureStoreSettings(e) {
       origin_lat REAL NOT NULL DEFAULT 40.4093,
       origin_lng REAL NOT NULL DEFAULT 49.8671,
       origin_label TEXT NOT NULL DEFAULT 'Bakı mərkəz',
-      base_fee REAL NOT NULL DEFAULT 2.5,
-      per_km REAL NOT NULL DEFAULT 0.75,
-      min_fee REAL NOT NULL DEFAULT 3.5,
-      morning_multiplier REAL NOT NULL DEFAULT 1.15,
-      evening_multiplier REAL NOT NULL DEFAULT 1.25,
-      night_multiplier REAL NOT NULL DEFAULT 1.20,
-      weekend_multiplier REAL NOT NULL DEFAULT 1.10,
+      base_fee REAL NOT NULL DEFAULT 3.2,
+      per_km REAL NOT NULL DEFAULT 0.32,
+      min_fee REAL NOT NULL DEFAULT 5,
+      morning_multiplier REAL NOT NULL DEFAULT 1.08,
+      evening_multiplier REAL NOT NULL DEFAULT 1.12,
+      night_multiplier REAL NOT NULL DEFAULT 1.08,
+      weekend_multiplier REAL NOT NULL DEFAULT 1.05,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     )`).run();
   }
@@ -157,12 +159,17 @@ async function readStoreSettings(e, ownerId) {
   await ensureStoreSettings(e);
   const row = await e.DB.prepare("SELECT * FROM store_settings WHERE owner_user_id=?").bind(ownerId).first();
   if (!row) return { ...defaultStoreSettings };
-  return {
+  const settings = {
     originLat: Number(row.origin_lat), originLng: Number(row.origin_lng), originLabel: row.origin_label || "Mağaza",
     baseFee: Number(row.base_fee), perKm: Number(row.per_km), minFee: Number(row.min_fee),
     morningMultiplier: Number(row.morning_multiplier), eveningMultiplier: Number(row.evening_multiplier),
     nightMultiplier: Number(row.night_multiplier), weekendMultiplier: Number(row.weekend_multiplier),
   };
+  const isLegacyDefault = Math.abs(settings.baseFee - 2.5) < .001 && Math.abs(settings.perKm - .75) < .001 && Math.abs(settings.minFee - 3.5) < .001;
+  if (isLegacyDefault) return { ...settings, ...defaultStoreSettings, originLat: settings.originLat, originLng: settings.originLng, originLabel: settings.originLabel };
+  // İstifadəçi minimumu daha aşağı yazsa belə sistem 5 ₼-dan aşağı qiymət vermir.
+  settings.minFee = Math.max(5, settings.minFee || 0);
+  return settings;
 }
 const clampNum = (value, min, max, fallback) => {
   const n = Number(value);
@@ -274,6 +281,217 @@ async function sendWhatsAppStatus(e, order, status) {
   );
   return response.ok;
 }
+
+// --- AI Alış Köməkçisi: pulsuz web price monitor ---
+let aiPurchaseSchemaReady;
+function ensureAiPurchaseSchema(e) {
+  if (!aiPurchaseSchemaReady) {
+    aiPurchaseSchemaReady = Promise.all([
+      e.DB.prepare(`CREATE TABLE IF NOT EXISTS ai_price_watch (
+        owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        product_id TEXT NOT NULL,
+        product_name TEXT NOT NULL,
+        country_key TEXT NOT NULL DEFAULT 'america',
+        weight_grams REAL NOT NULL DEFAULT 0,
+        current_total_azn REAL NOT NULL DEFAULT 0,
+        enabled INTEGER NOT NULL DEFAULT 1,
+        threshold_pct REAL NOT NULL DEFAULT 8,
+        last_scan_at TEXT,
+        best_total_azn REAL,
+        best_product_azn REAL,
+        best_shipping_azn REAL,
+        best_title TEXT,
+        best_url TEXT,
+        best_source TEXT,
+        updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY(owner_user_id, product_id)
+      )`).run(),
+      e.DB.prepare(`CREATE TABLE IF NOT EXISTS ai_price_offers (
+        id TEXT PRIMARY KEY,
+        owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        product_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        url TEXT NOT NULL,
+        source TEXT NOT NULL DEFAULT '',
+        product_price_azn REAL NOT NULL,
+        shipping_azn REAL NOT NULL DEFAULT 0,
+        total_azn REAL NOT NULL,
+        currency TEXT NOT NULL DEFAULT 'AZN',
+        raw_price REAL NOT NULL DEFAULT 0,
+        found_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      )`).run(),
+      e.DB.prepare("CREATE INDEX IF NOT EXISTS idx_ai_watch_owner ON ai_price_watch(owner_user_id,enabled,updated_at)").run(),
+      e.DB.prepare("CREATE INDEX IF NOT EXISTS idx_ai_offer_product ON ai_price_offers(owner_user_id,product_id,total_azn,found_at DESC)").run(),
+    ]);
+  }
+  return aiPurchaseSchemaReady;
+}
+const defaultAiCountries = {
+  america: { name: 'Amerika', currency: '$', rate: 1.7, tariffs: [3.49,5.49,7.49,9.77] },
+  turkey: { name: 'Türkiyə', currency: '$', rate: 1.7, tariffs: [1.49,2.49,3.49,4.29] },
+  spain: { name: 'İspaniya', currency: '€', rate: 1.96, tariffs: [1.75,3.7,5.6,7.9] },
+};
+function aiCountry(state, key) { return (state.countries && state.countries[key]) || defaultAiCountries[key] || defaultAiCountries.america; }
+function aiShipping(weight, country) {
+  const g = Math.max(0, Number(weight)||0), a = Array.isArray(country.tariffs) ? country.tariffs : [0,0,0,0];
+  if (!g) return 0;
+  if (g <= 100) return Number(a[0])||0;
+  if (g <= 250) return Number(a[1])||0;
+  if (g <= 500) return Number(a[2])||0;
+  return Math.ceil(g/1000) * (Number(a[3])||0);
+}
+function aiCurrentUnitCost(item, state) {
+  const c = aiCountry(state, item.country || 'america');
+  return Math.round((((Number(item.price)||0) + aiShipping(item.weight, c)) * (Number(c.rate)||1)) * 100) / 100;
+}
+async function syncAiWatches(e, ownerId) {
+  await ensureAiPurchaseSchema(e);
+  const state = await readState(e, ownerId);
+  const products = productList(state);
+  for (const product of products) {
+    const ownerOrder = (state.orders||[]).find((o) => String(o.id) === String(product.orderId));
+    const item = ownerOrder?.items?.[product.index] || {};
+    const productId = String(product.id);
+    const countryKey = String(item.country || 'america');
+    const weight = Number(item.weight)||0;
+    const current = aiCurrentUnitCost(item, state);
+    await e.DB.prepare(`INSERT INTO ai_price_watch(owner_user_id,product_id,product_name,country_key,weight_grams,current_total_azn)
+      VALUES(?,?,?,?,?,?) ON CONFLICT(owner_user_id,product_id) DO UPDATE SET
+      product_name=excluded.product_name,country_key=excluded.country_key,weight_grams=excluded.weight_grams,current_total_azn=excluded.current_total_azn,updated_at=CURRENT_TIMESTAMP`)
+      .bind(ownerId, productId, String(product.name||'Məhsul').slice(0,220), countryKey, weight, current).run();
+  }
+  return state;
+}
+function decodeHtml(text='') {
+  return String(text).replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#x27;|&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim();
+}
+function safeExternalUrl(raw) {
+  try {
+    const url = new URL(raw);
+    if (!['http:','https:'].includes(url.protocol)) return null;
+    const h = url.hostname.toLowerCase();
+    if (h === 'localhost' || h.endsWith('.local') || /^127\./.test(h) || /^10\./.test(h) || /^192\.168\./.test(h) || /^172\.(1[6-9]|2\d|3[01])\./.test(h)) return null;
+    return url;
+  } catch { return null; }
+}
+function ddgTarget(href) {
+  try {
+    const absolute = href.startsWith('//') ? `https:${href}` : href;
+    const u = new URL(absolute, 'https://duckduckgo.com');
+    const target = u.searchParams.get('uddg');
+    return target ? decodeURIComponent(target) : u.href;
+  } catch { return ''; }
+}
+async function duckSearch(query) {
+  const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
+  const res = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 StockPilotPriceMonitor/1.0', 'accept-language':'en-US,en;q=0.8' } });
+  if (!res.ok) return [];
+  const html = await res.text();
+  const results = [];
+  const re = /<a[^>]+class=["'][^"']*result__a[^"']*["'][^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+  let m;
+  while ((m = re.exec(html)) && results.length < 8) {
+    const href = ddgTarget(m[1]), u = safeExternalUrl(href);
+    if (!u || u.hostname.includes('duckduckgo.com')) continue;
+    results.push({ url:u.href, title:decodeHtml(m[2]), source:u.hostname.replace(/^www\./,'') });
+  }
+  return results;
+}
+function priceCandidates(html) {
+  const out=[];
+  const push=(raw,currency='')=>{ const n=Number(String(raw).replace(/\s/g,'').replace(/,(?=\d{3}\b)/g,'').replace(',','.').replace(/[^0-9.]/g,'')); if(Number.isFinite(n)&&n>0&&n<100000) out.push({raw:n,currency}); };
+  const metaPatterns=[
+    /(?:product:price:amount|itemprop=["']price["'])[^>]*(?:content|value)=["']([0-9.,]+)["']/gi,
+    /(?:content|value)=["']([0-9.,]+)["'][^>]*(?:product:price:amount|itemprop=["']price["'])/gi,
+    /"price"\s*:\s*"?([0-9.,]+)"?/gi,
+  ];
+  for(const re of metaPatterns){let m; while((m=re.exec(html))&&out.length<20) push(m[1]);}
+  const symbolPatterns=[[/\$\s*([0-9]+(?:[.,][0-9]{1,2})?)/g,'USD'],[/€\s*([0-9]+(?:[.,][0-9]{1,2})?)/g,'EUR'],[/([0-9]+(?:[.,][0-9]{1,2})?)\s*(?:₼|AZN)\b/g,'AZN'],[/([0-9]+(?:[.,][0-9]{1,2})?)\s*(?:₺|TRY)\b/g,'TRY']];
+  for(const [re,c] of symbolPatterns){let m; while((m=re.exec(html))&&out.length<25) push(m[1],c);}
+  return out;
+}
+function detectedCurrency(html, fallbackSymbol) {
+  const m = html.match(/(?:priceCurrency|product:price:currency)[^A-Z]{0,20}(USD|EUR|AZN|TRY)/i);
+  if (m) return m[1].toUpperCase();
+  if (fallbackSymbol === '€') return 'EUR';
+  if (fallbackSymbol === '₼') return 'AZN';
+  if (fallbackSymbol === '₺') return 'TRY';
+  return 'USD';
+}
+function currencyRateToAzn(code, state, fallbackCountry) {
+  if (code === 'AZN') return 1;
+  const countries = Object.values(state.countries || defaultAiCountries);
+  if (code === 'EUR') { const x=countries.find(c=>c.currency==='€'); return Number(x?.rate)||1.96; }
+  if (code === 'USD') { const x=countries.find(c=>c.currency==='$'); return Number(x?.rate)||1.7; }
+  // TRY yalnız state-də ₺ tarifi varsa istifadə olunur; yoxdursa qeyri-dəqiq çevirmə etmə.
+  if (code === 'TRY') { const x=countries.find(c=>c.currency==='₺' || c.currency==='TRY'); return Number(x?.rate)||0; }
+  return Number(fallbackCountry?.rate)||0;
+}
+async function offerFromPage(result, state, watch) {
+  const url=safeExternalUrl(result.url); if(!url) return null;
+  try {
+    const res=await fetch(url.href,{redirect:'follow',headers:{'user-agent':'Mozilla/5.0 StockPilotPriceMonitor/1.0','accept':'text/html,application/xhtml+xml'}});
+    if(!res.ok) return null;
+    const type=res.headers.get('content-type')||''; if(!type.includes('text/html')) return null;
+    const html=(await res.text()).slice(0,900000);
+    const country=aiCountry(state,watch.country_key);
+    const candidates=priceCandidates(html);
+    if(!candidates.length) return null;
+    const fallbackCode=detectedCurrency(html,country.currency);
+    const converted=[];
+    for(const c of candidates){ const code=c.currency||fallbackCode; const rate=currencyRateToAzn(code,state,country); if(rate>0) converted.push({raw:c.raw,code,azn:c.raw*rate}); }
+    if(!converted.length) return null;
+    // məhsul səhifəsindəki çox kiçik kupon/faiz rəqəmlərini azaltmaq üçün cari qiymətin 15%-indən aşağı namizədləri at.
+    const floor=Math.max(1,(Number(watch.current_total_azn)||0)*0.15);
+    const plausible=converted.filter(x=>x.azn>=floor).sort((a,b)=>a.azn-b.azn);
+    const pick=plausible[0]||converted.sort((a,b)=>a.azn-b.azn)[0];
+    const shipping=Math.round(aiShipping(watch.weight_grams,country)*(Number(country.rate)||1)*100)/100;
+    const product=Math.round(pick.azn*100)/100, total=Math.round((product+shipping)*100)/100;
+    return { title:result.title||watch.product_name,url:url.href,source:result.source||url.hostname,productPriceAzn:product,shippingAzn:shipping,totalAzn:total,currency:pick.code,rawPrice:pick.raw };
+  } catch { return null; }
+}
+async function scanAiProduct(e, ownerId, productId, {notify=true,sync=true}={}) {
+  const state=sync ? await syncAiWatches(e,ownerId) : await readState(e,ownerId);
+  const watch=await e.DB.prepare('SELECT * FROM ai_price_watch WHERE owner_user_id=? AND product_id=?').bind(ownerId,productId).first();
+  if(!watch) return { error:'Məhsul izləmədə tapılmadı.' };
+  const country=aiCountry(state,watch.country_key);
+  const query=`${watch.product_name} ${country.name||''} buy price`;
+  const results=await duckSearch(query);
+  const offers=[];
+  for(const result of results.slice(0,5)){ const offer=await offerFromPage(result,state,watch); if(offer) offers.push(offer); }
+  offers.sort((a,b)=>a.totalAzn-b.totalAzn);
+  await e.DB.prepare('DELETE FROM ai_price_offers WHERE owner_user_id=? AND product_id=?').bind(ownerId,productId).run();
+  for(const o of offers.slice(0,5)){ await e.DB.prepare(`INSERT INTO ai_price_offers(id,owner_user_id,product_id,title,url,source,product_price_azn,shipping_azn,total_azn,currency,raw_price) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).bind(crypto.randomUUID(),ownerId,productId,String(o.title).slice(0,300),String(o.url).slice(0,1500),String(o.source).slice(0,150),o.productPriceAzn,o.shippingAzn,o.totalAzn,o.currency,o.rawPrice).run(); }
+  const oldBest=Number(watch.best_total_azn)||0, best=offers[0]||null, now=new Date().toISOString();
+  if(best){
+    await e.DB.prepare(`UPDATE ai_price_watch SET last_scan_at=?,best_total_azn=?,best_product_azn=?,best_shipping_azn=?,best_title=?,best_url=?,best_source=?,updated_at=CURRENT_TIMESTAMP WHERE owner_user_id=? AND product_id=?`).bind(now,best.totalAzn,best.productPriceAzn,best.shippingAzn,String(best.title).slice(0,300),String(best.url).slice(0,1500),String(best.source).slice(0,150),ownerId,productId).run();
+    const current=Number(watch.current_total_azn)||0, threshold=Math.max(0,Number(watch.threshold_pct)||8);
+    const savings=current>0?((current-best.totalAzn)/current)*100:0;
+    const materiallyNew=!oldBest || best.totalAzn < oldBest-0.05;
+    if(notify && materiallyNew && savings>=threshold){
+      await notification(e,ownerId,'ai-price',`AI alış: ${watch.product_name}`,`${best.totalAzn.toFixed(2)} ₼ (karqo daxil) · ${savings.toFixed(1)}% qənaət`,{productId,bestUrl:best.url,totalAzn:best.totalAzn,savingsPct:Math.round(savings*10)/10});
+    }
+  } else {
+    await e.DB.prepare('UPDATE ai_price_watch SET last_scan_at=?,updated_at=CURRENT_TIMESTAMP WHERE owner_user_id=? AND product_id=?').bind(now,ownerId,productId).run();
+  }
+  return { watch:{...watch,last_scan_at:now}, offers, best };
+}
+async function aiPurchasePayload(e,ownerId){
+  const state=await syncAiWatches(e,ownerId);
+  const rows=await e.DB.prepare('SELECT * FROM ai_price_watch WHERE owner_user_id=? ORDER BY enabled DESC, updated_at DESC').bind(ownerId).all();
+  const watches=[];
+  for(const w of rows.results||[]){
+    const offerRows=await e.DB.prepare('SELECT title,url,source,product_price_azn,shipping_azn,total_azn,currency,raw_price,found_at FROM ai_price_offers WHERE owner_user_id=? AND product_id=? ORDER BY total_azn ASC LIMIT 5').bind(ownerId,w.product_id).all();
+    watches.push({ productId:w.product_id,productName:w.product_name,countryKey:w.country_key,weightGrams:Number(w.weight_grams)||0,currentTotalAzn:Number(w.current_total_azn)||0,enabled:Boolean(w.enabled),thresholdPct:Number(w.threshold_pct)||0,lastScanAt:w.last_scan_at,bestTotalAzn:Number(w.best_total_azn)||0,bestProductAzn:Number(w.best_product_azn)||0,bestShippingAzn:Number(w.best_shipping_azn)||0,bestTitle:w.best_title||'',bestUrl:w.best_url||'',bestSource:w.best_source||'',offers:(offerRows.results||[]).map(o=>({title:o.title,url:o.url,source:o.source,productPriceAzn:Number(o.product_price_azn),shippingAzn:Number(o.shipping_azn),totalAzn:Number(o.total_azn),currency:o.currency,rawPrice:Number(o.raw_price),foundAt:o.found_at})) });
+  }
+  return { watches, countries:state.countries||defaultAiCountries };
+}
+async function scanAllAiWatches(e){
+  await ensureAiPurchaseSchema(e);
+  const rows=await e.DB.prepare("SELECT owner_user_id,product_id FROM ai_price_watch WHERE enabled=1 ORDER BY COALESCE(last_scan_at,'1970-01-01') ASC LIMIT 6").all();
+  for(const row of rows.results||[]){ try{ await scanAiProduct(e,row.owner_user_id,row.product_id,{notify:true,sync:false}); }catch{} }
+}
+
 export default {
   async fetch(r, e) {
     const u = new URL(r.url),
@@ -435,6 +653,34 @@ export default {
       return json({ ok: true, orderId: order.id }, 201);
     }
     const user = await who(r, e);
+    if (p === "/api/ai-purchases" && r.method === "GET") {
+      if (!user) return fail("Giriş tələb olunur.", 401);
+      return json(await aiPurchasePayload(e,user.id));
+    }
+    if (p === "/api/ai-purchases/scan-all" && r.method === "POST") {
+      if (!user) return fail("Giriş tələb olunur.", 401);
+      const payload=await aiPurchasePayload(e,user.id);
+      const enabled=payload.watches.filter(w=>w.enabled).slice(0,5);
+      const results=[];
+      for(const w of enabled){ try{ results.push(await scanAiProduct(e,user.id,w.productId,{notify:true,sync:false})); }catch(err){ results.push({productId:w.productId,error:String(err?.message||err)}); } }
+      return json({ok:true,scanned:results.length});
+    }
+    const aiScanMatch=p.match(/^\/api\/ai-purchases\/([^/]+)\/scan$/);
+    if(aiScanMatch && r.method === "POST") {
+      if (!user) return fail("Giriş tələb olunur.", 401);
+      return json(await scanAiProduct(e,user.id,decodeURIComponent(aiScanMatch[1]),{notify:true}));
+    }
+    const aiWatchMatch=p.match(/^\/api\/ai-purchases\/([^/]+)$/);
+    if(aiWatchMatch && r.method === "PUT") {
+      if (!user) return fail("Giriş tələb olunur.", 401);
+      await ensureAiPurchaseSchema(e);
+      const id=decodeURIComponent(aiWatchMatch[1]), body=await r.json();
+      const enabled=body.enabled===undefined?1:(body.enabled?1:0);
+      const threshold=clampNum(body.thresholdPct,0,90,8);
+      const result=await e.DB.prepare('UPDATE ai_price_watch SET enabled=?,threshold_pct=?,updated_at=CURRENT_TIMESTAMP WHERE owner_user_id=? AND product_id=?').bind(enabled,threshold,user.id,id).run();
+      if(!result.meta.changes) return fail('Məhsul izləmədə tapılmadı.',404);
+      return json({ok:true});
+    }
     if (p === "/api/me")
       return user
         ? json({ user: pub(user) })
@@ -449,7 +695,7 @@ export default {
           originLat: clampNum(body.originLat, -90, 90, current.originLat),
           originLng: clampNum(body.originLng, -180, 180, current.originLng),
           originLabel: String(body.originLabel || current.originLabel || "Mağaza").trim().slice(0,120),
-          baseFee: clampNum(body.baseFee, 0, 100, current.baseFee), perKm: clampNum(body.perKm, 0, 20, current.perKm), minFee: clampNum(body.minFee, 0, 100, current.minFee),
+          baseFee: clampNum(body.baseFee, 0, 100, current.baseFee), perKm: clampNum(body.perKm, 0, 20, current.perKm), minFee: clampNum(body.minFee, 5, 100, Math.max(5, current.minFee)),
           morningMultiplier: clampNum(body.morningMultiplier, 0.5, 3, current.morningMultiplier), eveningMultiplier: clampNum(body.eveningMultiplier, 0.5, 3, current.eveningMultiplier),
           nightMultiplier: clampNum(body.nightMultiplier, 0.5, 3, current.nightMultiplier), weekendMultiplier: clampNum(body.weekendMultiplier, 0.5, 3, current.weekendMultiplier),
         };
@@ -612,5 +858,8 @@ export default {
       return json({ ok: true, messageSent, whatsappUrl: whatsappUrl(order, status), order: { ...order, status } });
     }
     return e.ASSETS.fetch(r);
+  },
+  async scheduled(event, e, ctx) {
+    ctx.waitUntil(scanAllAiWatches(e));
   },
 };

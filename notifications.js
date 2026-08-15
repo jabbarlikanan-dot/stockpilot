@@ -3,8 +3,8 @@
   const request = (path, options = {}) => fetch(path, { ...options, headers: { Authorization: `Bearer ${token}`, ...(options.headers || {}) } });
   const esc = (value) => String(value || "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[m]));
   const formatDate = (value) => new Intl.DateTimeFormat("az-AZ", { dateStyle: "medium", timeStyle: "short", hour12: false }).format(new Date(value));
-  const sender = (item) => item.data?.from ? `Göndərən: ${item.data.from}` : item.kind === "customer-order" ? "Mənbə: Mağaza sifarişi" : item.kind === "order-status" ? "Mənbə: Sifariş sistemi" : "Mənbə: StockPilot";
-  const targetFor = (item) => item.kind === "customer-order" && item.data?.orderId ? `customer-orders.html#order-${encodeURIComponent(item.data.orderId)}` : `notifications.html#note-${encodeURIComponent(item.id)}`;
+  const sender = (item) => item.data?.from ? `Göndərən: ${item.data.from}` : item.kind === "customer-order" ? "Mənbə: Mağaza sifarişi" : item.kind === "order-status" ? "Mənbə: Sifariş sistemi" : item.kind === "ai-price" ? "Mənbə: AI Alış Köməkçisi" : "Mənbə: StockPilot";
+  const targetFor = (item) => item.kind === "customer-order" && item.data?.orderId ? `customer-orders.html#order-${encodeURIComponent(item.data.orderId)}` : item.kind === "ai-price" ? `ai-purchases.html#product-${encodeURIComponent(item.data?.productId || "")}` : `notifications.html#note-${encodeURIComponent(item.id)}`;
   let list = [];
 
   async function markOne(id) {
@@ -17,6 +17,7 @@
     const status = String(item.title || "").replace(/^Sifariş statusu:\s*/i, "").trim();
     if (item.kind === "order-status" && status) return `Sifariş · ${status}`;
     if (item.kind === "customer-order") return "Yeni müştəri sifarişi";
+    if (item.kind === "ai-price") return "AI alış · Yeni fürsət";
     return item.title || "Bildiriş";
   }
   function card(item, preview = false) {
@@ -25,7 +26,7 @@
     return `<article class="notification-item ${item.read ? "" : "unread"}" data-note-id="${esc(item.id)}" tabindex="0" role="link">
       <div class="notification-item-top"><b>${esc(title)}</b>${item.read ? "" : '<span class="notification-new">Yeni</span>'}</div>
       <small>${esc(body)}${preview ? ` · <time>${formatDate(item.createdAt)}</time>` : `<br><span>${esc(sender(item))}</span><br><time>${formatDate(item.createdAt)}</time>`}</small>
-      ${preview ? "" : `<a class="notification-open" href="${targetFor(item)}">${item.kind === "customer-order" ? "Müştəri sifarişinə keç →" : "Bildirişə bax →"}</a>`}
+      ${preview ? "" : `<a class="notification-open" href="${targetFor(item)}">${item.kind === "customer-order" ? "Müştəri sifarişinə keç →" : item.kind === "ai-price" ? "AI təklifinə bax →" : "Bildirişə bax →"}</a>`}
     </article>`;
   }
 

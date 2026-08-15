@@ -12,6 +12,7 @@
     <link rel="stylesheet" href="v29.css" />
     <link rel="stylesheet" href="v30.css" />
     <link rel="stylesheet" href="v33.css" />
+    <link rel="stylesheet" href="v34.css" />
 </head>
   <body>
     <div class="app-shell">
@@ -38,14 +39,14 @@
         </section>
         <section class="store-settings-section">
           <form id="storeSettingsForm" class="card store-settings-card">
-            <div class="store-settings-head"><div><p class="eyebrow">ÇATDIRILMA</p><h2>Mağaza çıxış nöqtəsi və taksi tarifi</h2><p class="notice">Ünvana çatdırılma qiyməti bu nöqtədən seçilən müştəri konumuna və çatdırılma saatına görə hesablanır.</p></div><button id="useStoreLocation" type="button" class="secondary">Cari konumu götür</button></div>
+            <div class="store-settings-head"><div><p class="eyebrow">ÇATDIRILMA</p><h2>Mağaza çıxış nöqtəsi və taksi tarifi</h2><p class="notice">Ünvana çatdırılma qiyməti bu nöqtədən seçilən müştəri konumuna və çatdırılma saatına görə hesablanır. Minimum qiymət 5 ₼-dır.</p></div><div class="store-settings-head-actions"><button id="taxiPreset" type="button" class="secondary">Bakı taksi preset</button><button id="useStoreLocation" type="button" class="secondary">Cari konumu götür</button></div></div>
             <div class="store-settings-grid">
               <label class="wide">Çıxış nöqtəsinin adı<input name="originLabel" placeholder="Məsələn: Nərimanov anbarı" /></label>
               <label>Enlik<input name="originLat" type="number" step="0.000001" required /></label>
               <label>Uzunluq<input name="originLng" type="number" step="0.000001" required /></label>
               <label>Baza qiymət<input name="baseFee" type="number" step="0.01" min="0" required /></label>
               <label>1 km üçün<input name="perKm" type="number" step="0.01" min="0" required /></label>
-              <label>Minimum çatdırılma<input name="minFee" type="number" step="0.01" min="0" required /></label>
+              <label>Minimum çatdırılma<input name="minFee" type="number" step="0.01" min="5" required /></label>
               <label>Səhər pik əmsalı<input name="morningMultiplier" type="number" step="0.01" min="0.5" max="3" required /></label>
               <label>Axşam pik əmsalı<input name="eveningMultiplier" type="number" step="0.01" min="0.5" max="3" required /></label>
               <label>Gecə əmsalı<input name="nightMultiplier" type="number" step="0.01" min="0.5" max="3" required /></label>
@@ -56,7 +57,7 @@
         </section>
       </main>
     </div>
-    <nav class="mobile-bottom" aria-label="Sürətli menyu"><a href="dashboard.html"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h8M8 17h5"/></svg><span>Sifarişlər</span></a><a href="customer-orders.html"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="9" r="3"/><circle cx="17" cy="10" r="2"/><path d="M3 20c.7-3.2 2.7-5 6-5 3.4 0 5.5 1.8 6.1 5"/></svg><span>Müştəri</span></a><a href="inventory.html"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h16v12H4zM8 8V5h8v3M8 13h8"/></svg><span>Stok</span></a><a class="active" href="profile.html"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3"/><path d="M5 20c.6-3.4 2.9-5 7-5s6.4 1.6 7 5"/></svg><span>Hesab</span></a></nav>
+    <nav class="mobile-bottom" aria-label="Sürətli menyu"><a href="dashboard.html"><svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M8 9h8M8 13h8M8 17h5"/></svg><span>Sifarişlər</span></a><a href="customer-orders.html"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="9" cy="9" r="3"/><circle cx="17" cy="10" r="2"/><path d="M3 20c.7-3.2 2.7-5 6-5 3.4 0 5.5 1.8 6.1 5"/></svg><span>Müştəri</span></a><a href="inventory.html"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 8h16v12H4zM8 8V5h8v3M8 13h8"/></svg><span>Stok</span></a><a class="active" href="profile.html"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3"/><path d="M5 20c.6-3.4 2.9-5 7-5s6.4 1.6 7 5"/></svg><span>Hesab</span></a><a href="ai-purchases.html"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l1 3 3 1v6l-3 1-1 3H9l-1-3-3-1V7l3-1 1-3Z"/><path d="M9 10h.01M15 10h.01M9 14c1.5 1 4.5 1 6 0"/></svg><span>AI Alış</span></a></nav>
     <script src="shell.js"></script><script src="profile.js"></script>
       <script src="redesign.js"></script>
     <script src="v29.js"></script>

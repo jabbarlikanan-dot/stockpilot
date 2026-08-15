@@ -1,0 +1,5 @@
+@media (max-width:760px){
+  .mobile-bottom{grid-template-columns:repeat(5,minmax(0,1fr))!important;gap:2px!important;padding-inline:5px!important}
+  .mobile-bottom a{min-width:0!important;padding-inline:2px!important}
+  .mobile-bottom a span{font-size:9px!important;white-space:nowrap}
+}

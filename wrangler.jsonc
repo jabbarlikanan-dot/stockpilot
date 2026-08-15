@@ -8,6 +8,9 @@
       "binding": "DB",
       "database_name": "stockpilot-db",
       "database_id": "ccfae471-04b5-4b0b-aa0e-029905ac562e"
-    },
-  ]
+    }
+  ],
+  "triggers": {
+    "crons": ["0 */6 * * *"]
+  }
 }

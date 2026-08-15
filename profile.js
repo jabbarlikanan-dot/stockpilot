@@ -77,3 +77,21 @@ async function setupStoreSettings() {
   };
 }
 setupStoreSettings().catch(() => {});
+
+// v35 — Bakı ride-hailing balanslı preset
+(() => {
+  const preset = document.getElementById("taxiPreset");
+  const form = document.getElementById("storeSettingsForm");
+  if (!preset || !form) return;
+  preset.addEventListener("click", () => {
+    form.baseFee.value = "3.20";
+    form.perKm.value = "0.32";
+    form.minFee.value = "5.00";
+    form.morningMultiplier.value = "1.08";
+    form.eveningMultiplier.value = "1.12";
+    form.nightMultiplier.value = "1.08";
+    form.weekendMultiplier.value = "1.05";
+    const message = document.getElementById("storeSettingsMessage");
+    if (message) message.textContent = "Bakı taksi preset tətbiq edildi. Yadda saxlamaq üçün düyməni basın.";
+  });
+})();

@@ -430,3 +430,7 @@ input:focus,select:focus,textarea:focus{border-color:rgba(198,217,44,.75)!import
     min-height:auto!important;
   }
 }
+
+/* v35 — delivery settings controls */
+.store-settings-head-actions{display:flex;gap:8px;flex-wrap:wrap;justify-content:flex-end}
+@media(max-width:720px){.store-settings-head-actions{width:100%;justify-content:stretch}.store-settings-head-actions .secondary{flex:1;min-width:0}}

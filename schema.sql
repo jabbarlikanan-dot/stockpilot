@@ -19,3 +19,39 @@ CREATE TABLE IF NOT EXISTS store_settings (
   weekend_multiplier REAL NOT NULL DEFAULT 1.10,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS ai_price_watch (
+  owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  product_id TEXT NOT NULL,
+  product_name TEXT NOT NULL,
+  country_key TEXT NOT NULL DEFAULT 'america',
+  weight_grams REAL NOT NULL DEFAULT 0,
+  current_total_azn REAL NOT NULL DEFAULT 0,
+  enabled INTEGER NOT NULL DEFAULT 1,
+  threshold_pct REAL NOT NULL DEFAULT 8,
+  last_scan_at TEXT,
+  best_total_azn REAL,
+  best_product_azn REAL,
+  best_shipping_azn REAL,
+  best_title TEXT,
+  best_url TEXT,
+  best_source TEXT,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY(owner_user_id, product_id)
+);
+CREATE INDEX IF NOT EXISTS idx_ai_watch_owner ON ai_price_watch(owner_user_id,enabled,updated_at);
+CREATE TABLE IF NOT EXISTS ai_price_offers (
+  id TEXT PRIMARY KEY,
+  owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  product_id TEXT NOT NULL,
+  title TEXT NOT NULL,
+  url TEXT NOT NULL,
+  source TEXT NOT NULL DEFAULT '',
+  product_price_azn REAL NOT NULL,
+  shipping_azn REAL NOT NULL DEFAULT 0,
+  total_azn REAL NOT NULL,
+  currency TEXT NOT NULL DEFAULT 'AZN',
+  raw_price REAL NOT NULL DEFAULT 0,
+  found_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_ai_offer_product ON ai_price_offers(owner_user_id,product_id,total_azn,found_at DESC);
