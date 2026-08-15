@@ -80,6 +80,7 @@ const esc = (s) =>
         "'": "&#039;",
       })[m],
   );
+const safeImg = (value) => { const src=String(value||'').trim(); return /^data:image\/(?:jpeg|png|webp);base64,[a-z0-9+/=]+$/i.test(src) || /^\/api\/images\/[A-Za-z0-9_./%-]+$/.test(src) && !src.includes('..') ? src : ''; };
 let saveTimer = null;
 const save = (now = false) => {
   state.ui.lastSavedAt = new Date().toISOString();
@@ -271,12 +272,12 @@ function allTotals() {
 }
 async function refreshCustomerOrders() {
   const response = await fetch("/api/customer-orders", {
-    headers: { Authorization: `Bearer ${localStorage.stockpilotToken}` },
+    credentials: "same-origin",
   });
   if (!response.ok) throw new Error("Sifarişlər yenilənmədi.");
   state.customerOrders = (await response.json()).orders || [];
   const stateResponse = await fetch("/api/state", {
-    headers: { Authorization: `Bearer ${localStorage.stockpilotToken}` },
+    credentials: "same-origin",
   });
   if (stateResponse.ok) {
     const fresh = (await stateResponse.json()).state || {};
@@ -306,7 +307,7 @@ function editCustomerOrder(id) {
   $("saveCustomerEdit").onclick = async () => {
     const response = await fetch(`/api/customer-orders/${id}`, {
       method: "PUT",
-      headers: { "content-type": "application/json", Authorization: `Bearer ${localStorage.stockpilotToken}` },
+      credentials: "same-origin", headers: { "content-type": "application/json" },
       body: JSON.stringify({ status: order.status, customer: { name: $("customerName").value, phone: $("customerPhone").value, note: $("customerNote").value, delivery: $("customerDelivery").value, preferredAt: $("customerPreferredAt").value, metro: $("customerMetro").value, address: $("customerAddress").value, payment: $("customerPayment").value } }),
     });
     if (!response.ok) return notify("Dəyişiklik yadda saxlanmadı.");
@@ -317,7 +318,7 @@ function editCustomerOrder(id) {
 }
 function bindCustomerOrderActions() {
   document.querySelectorAll("[data-customer-status]").forEach((select) => (select.onchange = async () => {
-    const response = await fetch(`/api/customer-orders/${select.dataset.customerStatus}`, { method: "PUT", headers: { "content-type": "application/json", Authorization: `Bearer ${localStorage.stockpilotToken}` }, body: JSON.stringify({ status: select.value }) });
+    const response = await fetch(`/api/customer-orders/${select.dataset.customerStatus}`, { method: "PUT", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: select.value }) });
     if (!response.ok) return notify("Status yadda saxlanmadı.");
     const result = await response.json().catch(() => ({}));
     if (result.whatsappUrl && confirm("Müştəriyə WhatsApp status mesajı açılsın?")) window.open(result.whatsappUrl, "_blank", "noopener");
@@ -328,7 +329,7 @@ function bindCustomerOrderActions() {
   document.querySelectorAll("[data-customer-next]").forEach((button) => (button.onclick = async () => {
     const id = button.dataset.customerNext;
     const status = button.dataset.nextStatus;
-    const response = await fetch(`/api/customer-orders/${id}`, { method: "PUT", headers: { "content-type": "application/json", Authorization: `Bearer ${localStorage.stockpilotToken}` }, body: JSON.stringify({ status }) });
+    const response = await fetch(`/api/customer-orders/${id}`, { method: "PUT", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ status }) });
     if (!response.ok) return notify("Status yadda saxlanmadı.", "error");
     await refreshCustomerOrders();
     render();
@@ -336,7 +337,7 @@ function bindCustomerOrderActions() {
   document.querySelectorAll("[data-customer-edit]").forEach((button) => (button.onclick = () => editCustomerOrder(button.dataset.customerEdit)));
   document.querySelectorAll("[data-customer-delete]").forEach((button) => (button.onclick = async () => {
     if (!confirm("Müştəri sifarişi silinsin?")) return;
-    const response = await fetch(`/api/customer-orders/${button.dataset.customerDelete}`, { method: "DELETE", headers: { Authorization: `Bearer ${localStorage.stockpilotToken}` } });
+    const response = await fetch(`/api/customer-orders/${button.dataset.customerDelete}`, { method: "DELETE", credentials: "same-origin" });
     if (!response.ok) return notify("Sifariş silinmədi.");
     await refreshCustomerOrders();
     hideModal();
@@ -396,6 +397,8 @@ function sortedOrders() {
 }
 function compactImage(file) {
   return new Promise((ok, no) => {
+    if (!file || file.size > 8 * 1024 * 1024) return no(new Error("Şəkil maksimum 8MB ola bilər."));
+    if (!["image/jpeg","image/png","image/webp"].includes(String(file.type || "").toLowerCase())) return no(new Error("Yalnız JPG, PNG və WEBP şəkilləri qəbul olunur."));
     const r = new FileReader();
     r.onload = () => {
       const im = new Image();
@@ -436,7 +439,7 @@ function productDetail(item) {
   const x = calc(item), sold = soldSummary(item), left = remainingQty(item);
   showModal(
     item.name,
-    `<div class="detail-card">${item.img ? `<img class="thumb" src="${item.img}">` : '<div class="noimg">Şəkil<br>yoxdur</div>'}<div><p class="category">${esc(item.category || "Digər")} · ${x.c.name}</p><div class="detail-grid"><div>Stokda qalan<b>${left} ədəd</b></div><div>Satılan<b>${soldQty(item)} ədəd</b></div><div>Çəki<b>${item.weight || 0} qr</b></div><div>Ümumi alış<b>${money(x.purchase)} ₼</b></div><div>Reallaşan qazanc<b class="lime">${money(sold.profit)} ₼</b></div><div>Karqo<b>${money(x.ship * x.c.rate)} ₼</b></div></div></div></div>`,
+    `<div class="detail-card">${safeImg(item.img) ? `<img class="thumb" src="${esc(safeImg(item.img))}">` : '<div class="noimg">Şəkil<br>yoxdur</div>'}<div><p class="category">${esc(item.category || "Digər")} · ${x.c.name}</p><div class="detail-grid"><div>Stokda qalan<b>${left} ədəd</b></div><div>Satılan<b>${soldQty(item)} ədəd</b></div><div>Çəki<b>${item.weight || 0} qr</b></div><div>Ümumi alış<b>${money(x.purchase)} ₼</b></div><div>Reallaşan qazanc<b class="lime">${money(sold.profit)} ₼</b></div><div>Karqo<b>${money(x.ship * x.c.rate)} ₼</b></div></div></div></div>`,
   );
 }
 function countryOptions(selected) {
@@ -604,8 +607,8 @@ function render() {
                 sold = soldSummary(i),
                 left = remainingQty(i),
                 soldCount = soldQty(i),
-                im = i.img
-                  ? `<img class="thumb" src="${i.img}">`
+                im = safeImg(i.img)
+                  ? `<img class="thumb" src="${esc(safeImg(i.img))}">`
                   : '<div class="noimg">Şəkil<br>yoxdur</div>';
               const isLow = left > 0 && left <= (+i.minStock || 3);
               const statusClass = left === 0 ? "sold" : isLow ? "low" : "ok";
@@ -910,13 +913,14 @@ function importSold(value) {
 }
 async function importItems(file) {
   if (!file) return;
+  if (file.size > 5 * 1024 * 1024) return notify("Excel faylı maksimum 5MB ola bilər.", "error");
   try { await loadXlsx(); } catch { return notify("Excel modulu yüklənmədi. İnterneti yoxlayın."); }
   const reader = new FileReader();
   reader.onload = (event) => {
     try {
       const book = XLSX.read(event.target.result, { type: "array" });
       const sheet = book.Sheets[book.SheetNames[0]];
-      const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+      const rows = XLSX.utils.sheet_to_json(sheet, { defval: "" }).slice(0, 5000);
       const o = active();
       const items = rows
         .map((row) => {
@@ -1048,6 +1052,7 @@ window.startStockPilot = () => {
   if ($("quoteBtn")) $("quoteBtn").onclick = () => {
     const o = active();
     const w = window.open("", "_blank");
+    if (!w) return notify("Brauzer popup pəncərəsini blokladı. Popup icazəsini aktiv edin.", "error");
     const itemText = o.items
       .map((item) => `${esc(item.name)} — ${money(calc(item).sales)} ₼`)
       .join("<br>");

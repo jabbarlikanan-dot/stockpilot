@@ -1,7 +1,5 @@
-const token = localStorage.stockpilotToken;
-if (!token) location.href = "index.html";
-const api = (path, options = {}) => fetch(path, { ...options, headers: { Authorization: `Bearer ${token}`, ...(options.headers || {}) } });
-const logout = () => { localStorage.removeItem("stockpilotToken"); location.href = "index.html"; };
+const api = (path, options = {}) => fetch(path, { ...options, credentials: "same-origin", headers: { ...(options.headers || {}) } });
+const logout = async () => { localStorage.removeItem("stockpilotToken"); try { await fetch("/api/logout", { method:"POST", credentials:"same-origin" }); } catch {} location.href = "index.html"; };
 function paint(user) {
   const full = `${user.firstName || ""} ${user.lastName || ""}`.trim();
   const userRoot = document.getElementById("user");
@@ -39,7 +37,7 @@ async function boot() {
     const update = await api("/api/profile", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     const data = await update.json().catch(() => ({}));
     if (!update.ok) { msg.className = "msg"; return (msg.textContent = data.error || "Dəyişiklik yadda saxlanmadı."); }
-    localStorage.stockpilotToken = data.token;
+    localStorage.removeItem("stockpilotToken");
     user = data.user;
     paint(user);
     form.currentPassword.value = ""; form.newPassword.value = "";

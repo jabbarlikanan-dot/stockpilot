@@ -73,10 +73,8 @@
 
   async function resolveUser(){
     if (window.currentUser) return window.currentUser;
-    const token = localStorage.stockpilotToken;
-    if (!token) return null;
     try{
-      const r = await fetch('/api/me',{headers:{Authorization:`Bearer ${token}`}});
+      const r = await fetch('/api/me',{credentials:'same-origin'});
       if (!r.ok) return null;
       return (await r.json()).user || null;
     }catch{return null}
@@ -163,7 +161,7 @@
     drawer.querySelectorAll('[data-mobile-store]').forEach(b=>b.addEventListener('click',()=>{close();mobileStoreOpen()}));
     drawer.querySelector('[data-mobile-logout]')?.addEventListener('click',()=>{
       const existing=document.getElementById('logout');
-      if(existing) existing.click(); else {localStorage.removeItem('stockpilotToken');location.href='index.html'}
+      if(existing) existing.click(); else {localStorage.removeItem('stockpilotToken');fetch('/api/logout',{method:'POST',credentials:'same-origin'}).finally(()=>location.href='index.html')}
     });
     top.querySelector('.mobile-notification-trigger').addEventListener('click',()=>location.href='notifications.html');
     top.querySelector('.mobile-avatar').addEventListener('click',()=>location.href='account.html');

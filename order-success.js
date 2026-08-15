@@ -1,0 +1,12 @@
+const params = new URLSearchParams(location.search);
+const shop = params.get("shop") || "";
+const orderId = params.get("id") || "";
+const validOrderId = /^[0-9a-f-]{36}$/i.test(orderId) ? orderId : "";
+const validShop = /^[\w.-]{3,30}$/.test(shop) ? shop : "";
+const trackUrl = new URL("order-track.html", location.href);
+trackUrl.searchParams.set("shop", validShop);
+trackUrl.searchParams.set("id", validOrderId);
+document.getElementById("returnStore").href = `store.html?shop=${encodeURIComponent(validShop)}`;
+document.getElementById("trackOrder").href = trackUrl.href;
+document.getElementById("orderRef").textContent = validOrderId ? `#${validOrderId.slice(0, 8).toUpperCase()}` : "—";
+if (validOrderId && validShop) document.getElementById("trackingQr").src = `https://api.qrserver.com/v1/create-qr-code/?size=260x260&margin=10&data=${encodeURIComponent(trackUrl.href)}`;
