@@ -1,0 +1,11 @@
+worker.js
+wrangler.jsonc
+schema.sql
+reset-pin.mjs
+.assetsignore
+.gitignore
+.wrangler/**
+.git/**
+node_modules/**
+*.zip
+*.md

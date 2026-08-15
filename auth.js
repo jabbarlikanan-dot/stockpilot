@@ -1,13 +1,4 @@
-const api = (path, options = {}) =>
-  fetch(path, {
-    ...options,
-    headers: {
-      ...(options.headers || {}),
-      ...(localStorage.stockpilotToken
-        ? { Authorization: `Bearer ${localStorage.stockpilotToken}` }
-        : {}),
-    },
-  });
+const api = (path, options = {}) => fetch(path, { ...options, credentials: "same-origin", headers: { ...(options.headers || {}) } });
 
 function message(form, text) {
   form.querySelector(".msg").textContent = text;
@@ -62,11 +53,12 @@ async function login(event) {
       body: JSON.stringify(body),
     });
     const data = await readResponse(response);
-    if (response.ok && data.token) {
-      localStorage.stockpilotToken = data.token;
+    if (response.ok) {
+      localStorage.removeItem("stockpilotToken");
       return (location.href = "dashboard.html");
     }
-    return message(form, data.error || "Məlumatlar yanlışdır.");
+    const suffix = data.requestId ? ` · ID: ${data.requestId}` : "";
+    return message(form, `${data.error || "Məlumatlar yanlışdır."}${suffix}`);
   } catch {
     return message(
       form,
@@ -94,16 +86,17 @@ async function register(event) {
   try {
     const response = await fetch("/api/register", {
       method: "POST",
+      credentials: "same-origin",
       body: data,
     });
     const result = await readResponse(response);
-    if (response.ok && result.token) {
-      localStorage.stockpilotToken = result.token;
+    if (response.ok) {
+      localStorage.removeItem("stockpilotToken");
       return (location.href = "dashboard.html");
     }
     return message(
       form,
-      result.error || "Qeydiyyat baş tutmadı. Məlumatları yoxlayın.",
+      `${result.error || "Qeydiyyat baş tutmadı. Məlumatları yoxlayın."}${result.requestId ? ` · ID: ${result.requestId}` : ""}`,
     );
   } catch {
     return message(

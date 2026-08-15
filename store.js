@@ -12,6 +12,7 @@ let quoteTimer = null;
 const $ = (id) => document.getElementById(id);
 const money = (n) => `${(Number(n) || 0).toLocaleString("az-AZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₼`;
 const esc = (s) => String(s || "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[m]);
+const safeImg=(value)=>{const src=String(value||'').trim();return /^data:image\/(?:jpeg|png|webp);base64,[a-z0-9+/=]+$/i.test(src)||/^\/api\/images\/[A-Za-z0-9_./%-]+$/.test(src)&&!src.includes('..')?src:''};
 
 function showToast(text) {
   const toast = $("toast");
@@ -66,7 +67,7 @@ function render() {
   const visible = shown.slice(0, visibleProducts);
   $("products").innerHTML = (visible.map((product) => `
     <article class="product">
-      <div class="product-media">${product.image ? `<img src="${product.image}" alt="${esc(product.name)}" loading="lazy" decoding="async">` : '<div class="placeholder">Şəkil yoxdur</div>'}</div>
+      <div class="product-media">${safeImg(product.image) ? `<img src="${esc(safeImg(product.image))}" alt="${esc(product.name)}" loading="lazy" decoding="async">` : '<div class="placeholder">Şəkil yoxdur</div>'}</div>
       <div class="product-meta"><small>${esc(product.category || "Digər")}</small></div>
       <h2>${esc(product.name)}</h2>
       <footer><span class="price">${money(product.price)}</span><button data-add="${esc(product.id)}">Səbətə əlavə et</button></footer>

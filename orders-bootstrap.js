@@ -1,4 +1,3 @@
-const token = localStorage.stockpilotToken;
 const defaultState = {
   active: null,
   orders: [],
@@ -25,15 +24,13 @@ const defaultState = {
 };
 let currentUser;
 
-function logout() {
+async function logout() {
   localStorage.removeItem("stockpilotToken");
+  try { await fetch("/api/logout", { method:"POST", credentials:"same-origin" }); } catch {}
   location.href = "index.html";
 }
 function api(path, options = {}) {
-  return fetch(path, {
-    ...options,
-    headers: { Authorization: `Bearer ${token}`, ...(options.headers || {}) },
-  });
+  return fetch(path, { ...options, credentials: "same-origin", headers: { ...(options.headers || {}) } });
 }
 
 window.persistStockState = async (state) => {
@@ -58,7 +55,6 @@ window.accountPanel = () => {
 };
 
 async function start() {
-  if (!token) return logout();
   let state = defaultState;
   try {
     const [me, saved, customer] = await Promise.all([

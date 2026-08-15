@@ -1,4 +1,4 @@
-CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE COLLATE NOCASE, first_name TEXT NOT NULL, last_name TEXT NOT NULL, password_hash TEXT NOT NULL, salt TEXT NOT NULL, photo_key TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE IF NOT EXISTS users (id TEXT PRIMARY KEY, username TEXT NOT NULL UNIQUE COLLATE NOCASE, first_name TEXT NOT NULL, last_name TEXT NOT NULL, password_hash TEXT NOT NULL, salt TEXT NOT NULL, password_iterations INTEGER NOT NULL DEFAULT 210000, photo_key TEXT, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS user_state (user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE, state_json TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE TABLE IF NOT EXISTS customer_orders (id TEXT PRIMARY KEY, owner_user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, order_json TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'new', created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
 CREATE INDEX IF NOT EXISTS idx_customer_orders_owner ON customer_orders(owner_user_id, created_at DESC);
@@ -10,13 +10,13 @@ CREATE TABLE IF NOT EXISTS store_settings (
   origin_lat REAL NOT NULL DEFAULT 40.4093,
   origin_lng REAL NOT NULL DEFAULT 49.8671,
   origin_label TEXT NOT NULL DEFAULT 'Bakı mərkəz',
-  base_fee REAL NOT NULL DEFAULT 2.5,
-  per_km REAL NOT NULL DEFAULT 0.75,
-  min_fee REAL NOT NULL DEFAULT 3.5,
-  morning_multiplier REAL NOT NULL DEFAULT 1.15,
-  evening_multiplier REAL NOT NULL DEFAULT 1.25,
-  night_multiplier REAL NOT NULL DEFAULT 1.20,
-  weekend_multiplier REAL NOT NULL DEFAULT 1.10,
+  base_fee REAL NOT NULL DEFAULT 3.2,
+  per_km REAL NOT NULL DEFAULT 0.32,
+  min_fee REAL NOT NULL DEFAULT 5,
+  morning_multiplier REAL NOT NULL DEFAULT 1.08,
+  evening_multiplier REAL NOT NULL DEFAULT 1.12,
+  night_multiplier REAL NOT NULL DEFAULT 1.08,
+  weekend_multiplier REAL NOT NULL DEFAULT 1.05,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -55,3 +55,12 @@ CREATE TABLE IF NOT EXISTS ai_price_offers (
   found_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_ai_offer_product ON ai_price_offers(owner_user_id,product_id,total_azn,found_at DESC);
+
+
+CREATE TABLE IF NOT EXISTS security_rate_limits (
+  key_hash TEXT PRIMARY KEY,
+  count INTEGER NOT NULL DEFAULT 0,
+  window_start INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_security_rate_updated ON security_rate_limits(updated_at);
