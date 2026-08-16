@@ -45,7 +45,10 @@ if (!/^[a-z0-9_.-]{3,30}$/i.test(username)) {
 const sql = `SELECT username,password_hash,salt,password_iterations FROM users WHERE username='${username.replaceAll("'","''")}' COLLATE NOCASE LIMIT 1;`;
 let raw;
 try {
-  raw = execFileSync('npx.cmd', ['wrangler','d1','execute','stockpilot-db','--remote','--command',sql,'--json'], { encoding:'utf8', stdio:['ignore','pipe','pipe'] });
+  const comspec = process.env.ComSpec || process.env.COMSPEC || 'cmd.exe';
+  const safeSql = sql.replace(/"/g, '\"');
+  const command = `npx.cmd wrangler d1 execute stockpilot-db --remote --command "${safeSql}" --json`;
+  raw = execFileSync(comspec, ['/d','/s','/c', command], { encoding:'utf8', stdio:['ignore','pipe','pipe'] });
 } catch (e) {
   console.error('D1 oxunmadı. Wrangler login və database bağlantısını yoxla.');
   console.error(String(e.stderr || e.message || e)); process.exit(1);
