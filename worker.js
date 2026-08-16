@@ -46,9 +46,37 @@ const constantTimeEqual = (a, b) => {
   for (let i = 0; i < n; i++) diff |= (aa[i] || 0) ^ (bb[i] || 0);
   return diff === 0;
 };
-const APP_VERSION = '42.0.0';
+const APP_VERSION = '43.0.0';
 const PASSWORD_ITERATIONS = 210000;
 const LEGACY_PASSWORD_ITERATIONS = 100000;
+const PIN_HASH_VERSION = 'v3';
+async function hmacPin(secret, salt, password) {
+  const key = await crypto.subtle.importKey(
+    "raw",
+    enc.encode(String(secret || '')),
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  );
+  return b64(await crypto.subtle.sign("HMAC", key, enc.encode(`${String(salt || '')}:${String(password || '')}`)));
+}
+async function hashPinV3(password, salt, secret) {
+  return `${PIN_HASH_VERSION}:${salt}:${await hmacPin(secret, salt, password)}`;
+}
+async function verifyPinV3(password, stored, secret) {
+  const match = String(stored || '').trim().match(/^v3:([A-Za-z0-9+/_=-]+):([A-Za-z0-9+/_=-]+)$/);
+  if (!match) return null;
+  const expected = normalizeBase64(match[2]);
+  const actual = normalizeBase64(await hmacPin(secret, normalizeBase64(match[1]), password));
+  return constantTimeEqual(actual, expected);
+}
+async function verifyResetHash(password, stored) {
+  const match = String(stored || '').trim().match(/^reset:([A-Za-z0-9+/_=-]+):([A-Fa-f0-9]{64})$/);
+  if (!match) return null;
+  const bytes = await crypto.subtle.digest('SHA-256', enc.encode(`${match[1]}:${String(password || '')}`));
+  const actual = [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return constantTimeEqual(actual, match[2].toLowerCase());
+}
 function normalizeBase64(value) {
   const text = String(value || '').trim().replace(/-/g, '+').replace(/_/g, '/');
   return text.padEnd(Math.ceil(text.length / 4) * 4, '=');
@@ -942,7 +970,7 @@ export default {
 
         const id = crypto.randomUUID();
         const salt = b64(crypto.getRandomValues(new Uint8Array(16)));
-        const passwordHash = await hashPassword(password, salt, PASSWORD_ITERATIONS);
+        const passwordHash = await hashPinV3(password, salt, e.AUTH_SECRET);
         let key = null;
         const file = f.get("photo");
         if (file && typeof file !== "string" && file.size) {
@@ -958,7 +986,7 @@ export default {
         const columns = await userColumns(e);
         const insertColumns = ['id','username','first_name','last_name','password_hash','salt'];
         const values = [id, username, first, last, passwordHash, salt];
-        if (columns.has('password_iterations')) { insertColumns.push('password_iterations'); values.push(PASSWORD_ITERATIONS); }
+        if (columns.has('password_iterations')) { insertColumns.push('password_iterations'); values.push(0); }
         if (columns.has('photo_key')) { insertColumns.push('photo_key'); values.push(key); }
         if (columns.has('created_at')) { insertColumns.push('created_at'); values.push(new Date().toISOString()); }
         const placeholders = insertColumns.map(() => '?').join(',');
@@ -1005,31 +1033,49 @@ export default {
           return fail("Məlumatlar yanlışdır.", 401, { code: 'LOGIN_INVALID' });
         }
 
-        const verification = await verifyPassword(password, user.salt, user.password_hash, user.password_iterations);
-        if (!verification.ok) {
+        let loginOk = false;
+        let needsUpgrade = false;
+        const storedHash = String(user.password_hash || '').trim();
+        try {
+          const v3 = await verifyPinV3(password, storedHash, e.AUTH_SECRET);
+          if (v3 !== null) {
+            loginOk = v3;
+          } else {
+            const reset = await verifyResetHash(password, storedHash);
+            if (reset !== null) {
+              loginOk = reset;
+              needsUpgrade = reset;
+            } else {
+              // Legacy compatibility only. Keep the expensive PBKDF2 path away from all new accounts.
+              const verification = await verifyPassword(password, user.salt, storedHash, user.password_iterations);
+              loginOk = verification.ok;
+              needsUpgrade = verification.ok;
+            }
+          }
+        } catch (error) {
+          console.warn('login verification error', { requestId, username, error: String(error?.message || error) });
+        }
+        if (!loginOk) {
           await authRateFailure(e, rate);
-          const info = passwordHashInfo(user.password_hash, user.password_iterations, user.salt);
           console.warn('login rejected', {
             requestId,
             username,
             userFound: true,
-            hashKind: info.kind,
-            hashLength: String(user.password_hash || '').trim().length,
-            saltLength: String(user.salt || '').trim().length,
-            iterationsHint: Number(user.password_iterations) || null,
+            hashPrefix: storedHash.slice(0, 12),
+            hashLength: storedHash.length,
           });
-          return fail("Məlumatlar yanlışdır.", 401, { code: 'LOGIN_INVALID' });
+          return fail("Məlumatlar yanlışdır.", 401, { code: 'LOGIN_INVALID', requestId });
         }
 
-        // Normalize every successful legacy/prefixed hash to the simple v41 raw PBKDF2-210k format.
-        if (verification.iterations !== PASSWORD_ITERATIONS || verification.kind !== 'v2' || Number(user.password_iterations) !== PASSWORD_ITERATIONS) {
+        // Any reset/legacy hash is upgraded immediately to v3 HMAC using the server secret.
+        if (needsUpgrade || !storedHash.startsWith('v3:')) {
           const newSalt = b64(crypto.getRandomValues(new Uint8Array(16)));
-          const upgraded = await hashPassword(password, newSalt, PASSWORD_ITERATIONS);
+          const upgraded = await hashPinV3(password, newSalt, e.AUTH_SECRET);
           const columns = await userColumns(e);
           if (columns.has('password_iterations')) {
             await e.DB.prepare("UPDATE users SET password_hash=?,salt=?,password_iterations=? WHERE id=?")
-              .bind(upgraded, newSalt, PASSWORD_ITERATIONS, user.id).run();
-            user.password_iterations = PASSWORD_ITERATIONS;
+              .bind(upgraded, newSalt, 0, user.id).run();
+            user.password_iterations = 0;
           } else {
             await e.DB.prepare("UPDATE users SET password_hash=?,salt=? WHERE id=?").bind(upgraded, newSalt, user.id).run();
           }
@@ -1229,8 +1275,9 @@ export default {
       if (newPassword) {
         if (!/^\d{4}$/.test(newPassword))
           return fail("Yeni şifrə 4 rəqəm olmalıdır.");
-        const currentCheck = await verifyPassword(currentPassword, user.salt, user.password_hash, user.password_iterations);
-        if (!currentCheck.ok) return fail("Hazırkı şifrə yanlışdır.", 401);
+        let currentOk = await verifyPinV3(currentPassword, user.password_hash, e.AUTH_SECRET);
+        if (currentOk === null) currentOk = (await verifyPassword(currentPassword, user.salt, user.password_hash, user.password_iterations)).ok;
+        if (!currentOk) return fail("Hazırkı şifrə yanlışdır.", 401);
         passwordSalt = b64(crypto.getRandomValues(new Uint8Array(16)));
         passwordIterations = PASSWORD_ITERATIONS;
         passwordHash = await hashPassword(newPassword, passwordSalt, passwordIterations);
