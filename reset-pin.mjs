@@ -61,7 +61,8 @@ if (!/^\d{4}$/.test(pin)) {
 }
 
 const salt = randomBytes(16).toString('base64');
-const hash = pbkdf2Sync(pin, Buffer.from(salt, 'base64'), 210000, 32, 'sha256').toString('base64');
+const rawHash = pbkdf2Sync(pin, Buffer.from(salt, 'base64'), 210000, 32, 'sha256').toString('base64');
+const hash = `v2:210000:${salt}:${rawHash}`;
 const safeUser = username.replaceAll("'", "''");
 const sql = `UPDATE users SET salt='${salt}', password_hash='${hash}', password_iterations=210000 WHERE username='${safeUser}' COLLATE NOCASE;\nDELETE FROM security_rate_limits;\n`;
 const out = resolve('reset-pin.sql');

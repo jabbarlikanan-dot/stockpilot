@@ -46,6 +46,7 @@ const constantTimeEqual = (a, b) => {
   for (let i = 0; i < n; i++) diff |= (aa[i] || 0) ^ (bb[i] || 0);
   return diff === 0;
 };
+const APP_VERSION = '42.0.0';
 const PASSWORD_ITERATIONS = 210000;
 const LEGACY_PASSWORD_ITERATIONS = 100000;
 function normalizeBase64(value) {
@@ -61,38 +62,42 @@ async function deriveHash(password, salt, iterations = PASSWORD_ITERATIONS) {
   return b64(await crypto.subtle.deriveBits({ name: "PBKDF2", salt: decodeBase64(salt), iterations, hash: "SHA-256" }, key, 256));
 }
 async function hashPassword(password, salt, iterations = PASSWORD_ITERATIONS) {
-  // v41 stores the raw PBKDF2 output and keeps the iteration count in its own DB column.
-  // This avoids shell/SQL quoting problems around `$` while remaining backward-compatible.
-  return deriveHash(password, salt, iterations);
+  const raw = await deriveHash(password, salt, iterations);
+  return `v2:${iterations}:${salt}:${raw}`;
 }
-function passwordHashInfo(stored, iterationsHint) {
+function passwordHashInfo(stored, iterationsHint, saltHint) {
   const value = String(stored || '').trim();
+  const v2 = value.match(/^v2:(\d+):([A-Za-z0-9+/_=-]+):([A-Za-z0-9+/_=-]+)$/);
+  if (v2) {
+    const iterations = Math.min(600000, Math.max(50000, Number(v2[1]) || PASSWORD_ITERATIONS));
+    return { kind: 'v2', value: normalizeBase64(v2[3]), salt: normalizeBase64(v2[2]), candidates: [iterations] };
+  }
   const prefixed = value.match(/^pbkdf2\$(\d+)\$([A-Za-z0-9+/_=-]+)$/);
   if (prefixed) {
     const iterations = Math.min(600000, Math.max(50000, Number(prefixed[1]) || PASSWORD_ITERATIONS));
-    return { kind: 'prefixed', value: normalizeBase64(prefixed[2]), candidates: [iterations] };
+    return { kind: 'prefixed', value: normalizeBase64(prefixed[2]), salt: normalizeBase64(saltHint), candidates: [iterations] };
   }
   if (/^[A-Za-z0-9+/_-]{43}=?$/.test(value) || /^[A-Za-z0-9+/_-]{44}$/.test(value)) {
     const hint = Number(iterationsHint);
     const candidates = [];
     if (Number.isFinite(hint) && hint >= 50000 && hint <= 600000) candidates.push(hint);
     for (const n of [PASSWORD_ITERATIONS, LEGACY_PASSWORD_ITERATIONS]) if (!candidates.includes(n)) candidates.push(n);
-    return { kind: 'raw', value: normalizeBase64(value), candidates };
+    return { kind: 'raw', value: normalizeBase64(value), salt: normalizeBase64(saltHint), candidates };
   }
-  if (/^\d{4}$/.test(value)) return { kind: 'literal', value, candidates: [] };
-  return { kind: 'unknown', value, candidates: [] };
+  if (/^\d{4}$/.test(value)) return { kind: 'literal', value, salt: '', candidates: [] };
+  return { kind: 'unknown', value, salt: '', candidates: [] };
 }
 async function verifyPassword(password, salt, stored, iterationsHint) {
-  const info = passwordHashInfo(stored, iterationsHint);
+  const info = passwordHashInfo(stored, iterationsHint, salt);
   if (info.kind === 'literal') return { ok: constantTimeEqual(String(password), info.value), iterations: 0, kind: info.kind };
   if (info.kind === 'unknown') return { ok: false, iterations: 0, kind: info.kind };
   try {
     for (const iterations of info.candidates) {
-      const derived = normalizeBase64(await deriveHash(password, salt, iterations));
+      const derived = normalizeBase64(await deriveHash(password, info.salt, iterations));
       if (constantTimeEqual(derived, info.value)) return { ok: true, iterations, kind: info.kind };
     }
   } catch (error) {
-    console.warn('password verification failed to derive', { kind: info.kind, saltLength: String(salt || '').length });
+    console.warn('password verification failed to derive', { kind: info.kind, saltLength: String(info.salt || '').length });
   }
   return { ok: false, iterations: 0, kind: info.kind };
 }
@@ -911,6 +916,7 @@ export default {
       applySecurityHeaders(headers);
       return new Response(o.body, { headers });
     }
+    if (p === "/api/version" && r.method === "GET") return json({ version: APP_VERSION });
     if (p === "/api/register" && r.method === "POST") {
       const requestId = r.headers.get('cf-ray') || crypto.randomUUID();
       try {
@@ -1002,7 +1008,7 @@ export default {
         const verification = await verifyPassword(password, user.salt, user.password_hash, user.password_iterations);
         if (!verification.ok) {
           await authRateFailure(e, rate);
-          const info = passwordHashInfo(user.password_hash, user.password_iterations);
+          const info = passwordHashInfo(user.password_hash, user.password_iterations, user.salt);
           console.warn('login rejected', {
             requestId,
             username,
@@ -1016,7 +1022,7 @@ export default {
         }
 
         // Normalize every successful legacy/prefixed hash to the simple v41 raw PBKDF2-210k format.
-        if (verification.iterations !== PASSWORD_ITERATIONS || verification.kind !== 'raw' || Number(user.password_iterations) !== PASSWORD_ITERATIONS) {
+        if (verification.iterations !== PASSWORD_ITERATIONS || verification.kind !== 'v2' || Number(user.password_iterations) !== PASSWORD_ITERATIONS) {
           const newSalt = b64(crypto.getRandomValues(new Uint8Array(16)));
           const upgraded = await hashPassword(password, newSalt, PASSWORD_ITERATIONS);
           const columns = await userColumns(e);
