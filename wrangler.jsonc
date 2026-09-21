@@ -4,7 +4,8 @@
   "compatibility_date": "2026-08-12",
   "assets": {
     "directory": ".",
-    "binding": "ASSETS"
+    "binding": "ASSETS",
+    "run_worker_first": true
   },
   "d1_databases": [
     {
@@ -14,6 +15,6 @@
     }
   ],
   "triggers": {
-    "crons": ["0 */6 * * *"]
+    "crons": ["*/5 * * * *"]
   }
 }

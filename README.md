@@ -1,3 +1,7 @@
+# v44 bugfix yenilənməsi
+
+Əvvəl `V44-BUGFIX-REPORT.md` faylını oxuyun: düzəlişlər, test nəticəsi, məhdudiyyətlər və yeniləmə addımları oradadır. Frontend və Worker birlikdə yenilənməlidir. Test: `npm test`.
+
 # StockPilot — şəxsi stok, sifariş və açıq mağaza sistemi
 
 Bu paket **static upload üçün deyil**. Fərdi hesabların, şifrələrin, sifarişlərin və statistikanın telefonla digər kompüterdə də eyni qalması üçün Cloudflare Worker + D1 database ilə deploy edilməlidir.

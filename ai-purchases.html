@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="v29.css" />
   <link rel="stylesheet" href="v30.css" />
   <link rel="stylesheet" href="ai-purchases.css" />
+<script src="domain.js"></script>
 </head>
 <body>
   <div class="app-shell">
@@ -26,7 +27,7 @@
         <a href="profile.html"><svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="3"/><path d="M5 20c.8-4 3.1-6 7-6s6.2 2 7 6"/></svg><span class="nav-label">Profil ayarları</span></a>
         <button id="logout"><svg viewBox="0 0 24 24"><path d="M10 4H5v16h5M14 8l4 4-4 4m4-4H9"/></svg><span class="nav-label">Çıxış</span></button>
       </nav>
-      <small class="sidebar-foot">v3.4 · AI alış monitoru</small>
+      <small class="sidebar-foot">v44 · Qiymət monitoru</small>
     </aside>
     <main class="app-main ai-main">
       <header class="topbar">
@@ -38,14 +39,14 @@
         </div>
       </header>
       <section class="heading ai-heading">
-        <div><p class="ai-kicker">PULSUZ QİYMƏT MONİTORU</p><h1>AI Alış Köməkçisi</h1><p>Stokdakı məhsullar üçün daha ucuz alış variantlarını axtarır, karqonu əlavə edir və yaxşı fürsət tapanda bildiriş göndərir.</p></div>
+        <div><p class="ai-kicker">PULSUZ QİYMƏT MONİTORU</p><h1>AI Alış Köməkçisi</h1><p>Stokdakı məhsullar üçün daha ucuz alış variantlarını axtarır, təxmini karqonu əlavə edir və yaxşı fürsət tapanda bildiriş göndərir.</p></div>
         <button id="scanAll" class="primary">Hamısını yoxla</button>
       </section>
       <section class="ai-summary" aria-live="polite">
         <article><span>İzlənən</span><b id="watchCount">—</b><small>aktiv məhsul</small></article>
         <article><span>Fürsət</span><b id="dealCount">—</b><small>limitdən ucuz</small></article>
         <article><span>Potensial qənaət</span><b id="savingTotal">—</b><small>vahid alış üzrə</small></article>
-        <article><span>Yoxlama</span><b>6 saat</b><small>Cloudflare cron</small></article>
+        <article><span>Yoxlama</span><b>Növbə ilə</b><small>6 saatdan köhnə nəticələr</small></article>
       </section>
       <section class="ai-toolbar">
         <label class="ai-search"><svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></svg><input id="search" type="search" placeholder="Məhsul adı ilə axtar..." /></label>
@@ -53,7 +54,7 @@
       </section>
       <div id="status" class="ai-status" role="status" aria-live="polite"></div>
       <section id="watchList" class="ai-watch-list"></section>
-      <aside class="ai-note"><b>Necə işləyir?</b><p>Bu versiya ödənişli AI API istifadə etmir. Açıq web axtarışından və mağaza səhifələrinin qiymət metadata-sından istifadə edir. Bəzi saytlar avtomatik oxunu bloklaya bilər; sistem tapa bilmədiyi qiyməti uydurmur.</p></aside>
+      <aside class="ai-note"><b>Necə işləyir?</b><p>Bu versiya ödənişli AI API istifadə etmir. Açıq web axtarışından və mağaza səhifələrinin qiymət metadata-sından istifadə edir. Bəzi saytlar avtomatik oxunu bloklaya bilər; yalnız məhsul adı, ölçü, stok və valyutası uyğun açıq təklif göstərilir. Satıcının daxili çatdırılması, vergilər və digər əlavə xərclər daxil deyil. TRY məzənnəsi təyin edilməyibsə lirə təklifləri hesablanmır.</p></aside>
     </main>
   </div>
   <nav class="mobile-bottom ai-mobile-bottom" aria-label="Sürətli menyu">

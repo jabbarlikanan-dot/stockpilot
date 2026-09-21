@@ -33,18 +33,7 @@ function api(path, options = {}) {
   return fetch(path, { ...options, credentials: "same-origin", headers: { ...(options.headers || {}) } });
 }
 
-window.persistStockState = async (state) => {
-  try {
-    const response = await api("/api/state", {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ state }),
-    });
-    if (!response.ok) throw new Error("State save failed");
-  } catch {
-    console.error("Məlumat serverə yazılmadı.");
-  }
-};
+window.persistStockState = (state) => window.StockState.save(state);
 
 window.accountPanel = () => {
   const total = allTotals();
@@ -62,13 +51,15 @@ async function start() {
       api("/api/state"),
       api("/api/customer-orders"),
     ]);
-    if (!me.ok) return logout();
+    if (me.status===401) { location.href="index.html";return; }
+    if(!me.ok||!saved.ok||!customer.ok)throw new Error("Məlumat yüklənmədi. Səhifəni yeniləyin.");
     currentUser = (await me.json()).user;
     window.currentUser = currentUser;
-    if (saved.ok) state = (await saved.json()).state || defaultState;
+    const snapshot=await saved.json();state=snapshot.state;
+    window.StockState.init(snapshot.version,currentUser.id);
     window.__customerOrders = customer.ok ? (await customer.json()).orders || [] : [];
-  } catch {
-    return logout();
+  } catch(error) {
+    window.StockState.status(error.message||"Məlumat yüklənmədi. Səhifəni yeniləyin.",true);return;
   }
   state = {
     ...defaultState,

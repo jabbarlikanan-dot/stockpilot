@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS ai_price_watch (
   enabled INTEGER NOT NULL DEFAULT 1,
   threshold_pct REAL NOT NULL DEFAULT 8,
   last_scan_at TEXT,
+  scan_status TEXT NOT NULL DEFAULT 'unscanned',
+  scan_error TEXT NOT NULL DEFAULT '',
   best_total_azn REAL,
   best_product_azn REAL,
   best_shipping_azn REAL,
@@ -64,3 +66,6 @@ CREATE TABLE IF NOT EXISTS security_rate_limits (
   updated_at INTEGER NOT NULL
 );
 CREATE INDEX IF NOT EXISTS idx_security_rate_updated ON security_rate_limits(updated_at);
+
+CREATE TABLE IF NOT EXISTS mutation_guard (id TEXT PRIMARY KEY,ok INTEGER NOT NULL CHECK(ok=1));
+CREATE TABLE IF NOT EXISTS checkout_keys (owner_user_id TEXT NOT NULL,request_key TEXT NOT NULL,order_id TEXT NOT NULL,body_hash TEXT NOT NULL,PRIMARY KEY(owner_user_id,request_key));

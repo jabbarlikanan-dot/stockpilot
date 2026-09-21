@@ -1,3 +1,5 @@
+import './domain.js';
+const D = globalThis.StockDomain;
 const enc = new TextEncoder();
 const SECURITY_HEADERS = {
   "x-content-type-options": "nosniff",
@@ -46,7 +48,7 @@ const constantTimeEqual = (a, b) => {
   for (let i = 0; i < n; i++) diff |= (aa[i] || 0) ^ (bb[i] || 0);
   return diff === 0;
 };
-const APP_VERSION = '43.0.0';
+const APP_VERSION = '44.0.0';
 const PASSWORD_ITERATIONS = 210000;
 const LEGACY_PASSWORD_ITERATIONS = 100000;
 const PIN_HASH_VERSION = 'v3';
@@ -135,7 +137,7 @@ async function mac(x, secret) {
 }
 async function issue(user, secret) {
   const header = b64urlText(JSON.stringify({ alg: "HS256", typ: "JWT" }));
-  const payload = b64urlText(JSON.stringify({ sub: user.id, exp: Math.floor(Date.now() / 1000) + 604800, iat: Math.floor(Date.now() / 1000) }));
+  const payload = b64urlText(JSON.stringify({ sub: user.id, credential: await mac(user.password_hash, secret), exp: Math.floor(Date.now() / 1000) + 604800, iat: Math.floor(Date.now() / 1000) }));
   return `${header}.${payload}.${await mac(`${header}.${payload}`, secret)}`;
 }
 const sessionCookie = (token) => `sp_session=${encodeURIComponent(token)}; Path=/; Max-Age=604800; HttpOnly; Secure; SameSite=Strict`;
@@ -144,7 +146,7 @@ function cookieValue(request, name) {
   const cookie = request.headers.get('cookie') || '';
   for (const part of cookie.split(';')) {
     const [key, ...rest] = part.trim().split('=');
-    if (key === name) return decodeURIComponent(rest.join('='));
+    if (key === name) { try { return decodeURIComponent(rest.join('=')); } catch { return ''; } }
   }
   return '';
 }
@@ -177,14 +179,18 @@ async function who(request, env) {
   const token = cookieValue(request, 'sp_session') || bearer;
   const payload = await verifyToken(token, env.AUTH_SECRET);
   if (!payload) return null;
-  return env.DB.prepare("SELECT * FROM users WHERE id=?").bind(payload.sub).first();
+  const user = await env.DB.prepare("SELECT * FROM users WHERE id=?").bind(payload.sub).first();
+  if (!user || !payload.credential || !constantTimeEqual(payload.credential, await mac(user.password_hash, env.AUTH_SECRET))) return null;
+  return user;
 }
 async function safeJson(request, maxBytes = 100000) {
   const length = Number(request.headers.get('content-length'));
   if (Number.isFinite(length) && length > maxBytes) throw new Error('PAYLOAD_TOO_LARGE');
-  const text = await request.text();
-  if (text.length > maxBytes) throw new Error('PAYLOAD_TOO_LARGE');
-  try { return JSON.parse(text || '{}'); } catch { throw new Error('BAD_JSON'); }
+  const reader=request.body?.getReader();let size=0;const chunks=[];
+  if(reader)try{while(true){const {done,value}=await reader.read();if(done)break;size+=value.length;if(size>maxBytes)throw new Error('PAYLOAD_TOO_LARGE');chunks.push(value);}}finally{await reader.cancel().catch(()=>{});}
+  const buffer=new Uint8Array(size);let offset=0;for(const chunk of chunks){buffer.set(chunk,offset);offset+=chunk.length;}
+  const text=new TextDecoder().decode(buffer);
+  try {const value=JSON.parse(text||'{}');if(!value||typeof value!=='object'||Array.isArray(value))throw new Error('BAD_JSON');return value;} catch {throw new Error('BAD_JSON');}
 }
 const unsafeMethod = (method) => !['GET', 'HEAD', 'OPTIONS'].includes(method);
 function validRequestOrigin(request) {
@@ -269,27 +275,73 @@ function ensureAuthSchema(e) {
   }
   return authSchemaReady;
 }
-const readState = async (e, id) => {
-  const row = await e.DB.prepare("SELECT state_json FROM user_state WHERE user_id=?").bind(id).first();
-  if (!row?.state_json) return { orders: [], customerSales: [] };
-  try {
-    const value = JSON.parse(row.state_json);
-    return value && typeof value === "object" && Array.isArray(value.orders) ? value : { orders: [], customerSales: [] };
-  } catch {
-    return { orders: [], customerSales: [] };
+async function stateVersion(raw) {
+  return b64urlBytes(await crypto.subtle.digest('SHA-256', enc.encode(raw || '')));
+}
+async function stateSnapshot(e,id) {
+  const row=await e.DB.prepare('SELECT state_json FROM user_state WHERE user_id=?').bind(id).first();
+  const raw=row?.state_json ?? null;
+  let state={orders:[],customerSales:[]};
+  if(raw!==null){
+    try { state=JSON.parse(raw); } catch { throw new Error('STATE_CORRUPT'); }
+    if(!state || typeof state!=='object' || !Array.isArray(state.orders)) throw new Error('STATE_CORRUPT');
   }
-};
+  D.normalize(state);
+  return {state,raw,version:await stateVersion(raw)};
+}
+const readState=async(e,id)=>(await stateSnapshot(e,id)).state;
+let operationsReady;
+async function ensureOperations(e) {
+  if(!operationsReady) operationsReady=(async()=>{
+    await ensureAuthSchema(e);
+    await e.DB.prepare("CREATE TABLE IF NOT EXISTS customer_orders (id TEXT PRIMARY KEY,owner_user_id TEXT NOT NULL REFERENCES users(id),order_json TEXT NOT NULL,status TEXT NOT NULL DEFAULT 'new',created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)").run();
+    await e.DB.prepare("CREATE TABLE IF NOT EXISTS mutation_guard (id TEXT PRIMARY KEY, ok INTEGER NOT NULL CHECK(ok=1))").run();
+    await e.DB.prepare("CREATE TABLE IF NOT EXISTS checkout_keys (owner_user_id TEXT NOT NULL,request_key TEXT NOT NULL,order_id TEXT NOT NULL,body_hash TEXT NOT NULL,PRIMARY KEY(owner_user_id,request_key))").run();
+  })().catch(error=>{operationsReady=null;throw error;});
+  return operationsReady;
+}
+async function commitCustomerChange(e,userId,id,row,order,status,snapshot=null) {
+  const guard=crypto.randomUUID();
+  const statements=[e.DB.prepare(`INSERT INTO mutation_guard(id,ok) VALUES(?,CASE WHEN
+    EXISTS(SELECT 1 FROM customer_orders WHERE id=? AND owner_user_id=? AND order_json=? AND status=?)
+    AND (?=0 OR EXISTS(SELECT 1 FROM user_state WHERE user_id=? AND state_json=?)) THEN 1 ELSE 0 END)`)
+    .bind(guard,id,userId,row.order_json,row.status,snapshot?1:0,userId,snapshot?.raw||'')];
+  if(snapshot) statements.push(e.DB.prepare('UPDATE user_state SET state_json=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?').bind(JSON.stringify(snapshot.state),userId));
+  statements.push(e.DB.prepare('UPDATE customer_orders SET order_json=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND owner_user_id=?').bind(JSON.stringify(order),status,id,userId));
+  statements.push(e.DB.prepare('DELETE FROM mutation_guard WHERE id=?').bind(guard));
+  try { await e.DB.batch(statements); } catch(error) {
+    if(String(error?.message).includes('CHECK constraint failed')) return false;
+    throw error;
+  }
+  return true;
+}
 const validateState = (state) => {
   if (!state || typeof state !== "object" || Array.isArray(state)) return "State düzgün formatda deyil.";
   if (!Array.isArray(state.orders)) return "Sifariş siyahısı düzgün formatda deyil.";
   if (state.orders.length > 2000) return "Sifariş sayı limitdən çoxdur.";
+  const orderIds=new Set(),itemIds=new Set();
   for (const order of state.orders) {
     if (!order || typeof order !== "object" || !Array.isArray(order.items)) return "Sifariş məlumatı düzgün deyil.";
+    if (!order.id || orderIds.has(String(order.id))) return 'Sifariş ID təkrarlanır və ya yoxdur.';
+    orderIds.add(String(order.id));
+    for(const [index,item] of order.items.entries()) {
+      if(!item || typeof item!=='object' || !String(item.name||'').trim()) return 'Məhsul adı tələb olunur.';
+      const id=String(item.id||`${order.id}:${index}`);
+      if(itemIds.has(id)) return 'Məhsul ID təkrarlanır.';
+      itemIds.add(id);
+      for(const key of ['qty','acquiredQty','soldQty','minStock','price','sale','weight']) {
+        if(item[key]!==undefined && (!Number.isFinite(Number(item[key])) || Number(item[key])<0)) return 'Məhsul dəyəri mənfi və ya düzgün olmayan ədəddir.';
+      }
+      if(!Number.isInteger(Number(item.qty))) return 'Məhsul sayı tam ədəd olmalıdır.';
+    }
     if (order.items.length > 5000) return "Bir sifarişdə məhsul sayı limitdən çoxdur.";
+  }
+  for(const c of Object.values(state.countries||{})) {
+    if(!c || !Number.isFinite(Number(c.rate)) || Number(c.rate)<=0 || !Array.isArray(c.tariffs) || c.tariffs.length!==4 || c.tariffs.some(v=>!Number.isFinite(Number(v))||Number(v)<0)) return 'Məzənnə və tariflər düzgün deyil.';
   }
   if (!validateStateTree(state)) return "Məlumat daxilində icazə verilməyən və ya həddən artıq böyük dəyər var.";
   const encoded = JSON.stringify(state);
-  if (encoded.length > 8_000_000) return "Məlumat ölçüsü çox böyükdür.";
+  if (enc.encode(encoded).length > 1_800_000) return "Məlumat 1.8 MB saxlama həddini keçir. Şəkilləri kiçildin və təkrar saxlayın.";
   return null;
 };
 const safeImageValue = (value) => {
@@ -302,7 +354,7 @@ const productList = (state, reserved = {}) =>
   (state.orders || []).flatMap((order) =>
     (order.items || []).map((item, index) => {
       const id = item.id || `${order.id}:${index}`;
-      const physical = Math.max(0, Number(item.qty) || 0);
+      const physical = D.remaining(item);
       return {
         id,
         name: item.name,
@@ -395,7 +447,7 @@ function haversineKm(aLat, aLng, bLat, bLng) {
 async function roadDistanceKm(settings, lat, lng) {
   try {
     const url = `https://router.project-osrm.org/route/v1/driving/${settings.originLng},${settings.originLat};${lng},${lat}?overview=false&alternatives=false&steps=false`;
-    const response = await fetch(url, { headers: { "user-agent": "StockPilot/1.0" } });
+    const response = await fetch(url, { signal:AbortSignal.timeout(6000), headers: { "user-agent": "StockPilot/1.0" } });
     const data = await response.json();
     const meters = Number(data?.routes?.[0]?.distance);
     if (response.ok && Number.isFinite(meters) && meters > 0) return meters / 1000;
@@ -533,6 +585,11 @@ function ensureAiPurchaseSchema(e) {
         raw_price REAL NOT NULL DEFAULT 0,
         found_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
       )`).run();
+      const cols=await tableColumns(e,'ai_price_watch');
+      for(const [name,type] of [['scan_status',"TEXT NOT NULL DEFAULT 'unscanned'"],['scan_error',"TEXT NOT NULL DEFAULT ''"]])if(!cols.has(name)){
+        try {await e.DB.prepare(`ALTER TABLE ai_price_watch ADD COLUMN ${name} ${type}`).run();}catch(error){if(!(await tableColumns(e,'ai_price_watch')).has(name))throw error;}
+      }
+      await e.DB.prepare("UPDATE ai_price_watch SET best_total_azn=NULL,best_product_azn=NULL,best_shipping_azn=NULL,best_title=NULL,best_url=NULL,best_source=NULL,last_scan_at=NULL WHERE scan_status='unscanned'").run();
       await e.DB.prepare("CREATE INDEX IF NOT EXISTS idx_ai_watch_owner ON ai_price_watch(owner_user_id,enabled,updated_at)").run();
       await e.DB.prepare("CREATE INDEX IF NOT EXISTS idx_ai_offer_product ON ai_price_offers(owner_user_id,product_id,total_azn,found_at DESC)").run();
       return true;
@@ -557,10 +614,7 @@ function aiShipping(weight, country) {
   if (g <= 500) return Number(a[2])||0;
   return Math.ceil(g/1000) * (Number(a[3])||0);
 }
-function aiCurrentUnitCost(item, state) {
-  const c = aiCountry(state, item.country || 'america');
-  return Math.round((((Number(item.price)||0) + aiShipping(item.weight, c)) * (Number(c.rate)||1)) * 100) / 100;
-}
+function aiCurrentUnitCost(item,state) { return D.round(D.unitCost(item,state)); }
 async function syncAiWatches(e, ownerId) {
   await ensureAiPurchaseSchema(e);
   const state = await readState(e, ownerId);
@@ -570,14 +624,39 @@ async function syncAiWatches(e, ownerId) {
     const item = ownerOrder?.items?.[product.index] || {};
     const productId = String(product.id);
     const countryKey = String(item.country || 'america');
-    const weight = Number(item.weight)||0;
+    const weight = D.acquired(item)>0?(Number(item.weight)||0)/D.acquired(item):0;
     const current = aiCurrentUnitCost(item, state);
     await e.DB.prepare(`INSERT INTO ai_price_watch(owner_user_id,product_id,product_name,country_key,weight_grams,current_total_azn)
       VALUES(?,?,?,?,?,?) ON CONFLICT(owner_user_id,product_id) DO UPDATE SET
-      product_name=excluded.product_name,country_key=excluded.country_key,weight_grams=excluded.weight_grams,current_total_azn=excluded.current_total_azn,updated_at=CURRENT_TIMESTAMP`)
+      scan_status=CASE WHEN product_name<>excluded.product_name OR country_key<>excluded.country_key OR weight_grams<>excluded.weight_grams OR current_total_azn<>excluded.current_total_azn THEN 'unscanned' ELSE scan_status END,
+      best_total_azn=CASE WHEN product_name<>excluded.product_name OR country_key<>excluded.country_key OR weight_grams<>excluded.weight_grams OR current_total_azn<>excluded.current_total_azn THEN NULL ELSE best_total_azn END,
+      last_scan_at=CASE WHEN product_name<>excluded.product_name OR country_key<>excluded.country_key OR weight_grams<>excluded.weight_grams OR current_total_azn<>excluded.current_total_azn THEN NULL ELSE last_scan_at END,
+      product_name=excluded.product_name,country_key=excluded.country_key,weight_grams=excluded.weight_grams,current_total_azn=excluded.current_total_azn`)
       .bind(ownerId, productId, String(product.name||'Məhsul').slice(0,220), countryKey, weight, current).run();
   }
+  await e.DB.prepare("DELETE FROM ai_price_offers WHERE owner_user_id=? AND product_id IN (SELECT product_id FROM ai_price_watch WHERE owner_user_id=? AND scan_status='unscanned')").bind(ownerId,ownerId).run();
+  const live=new Set(products.map(p=>String(p.id)));
+  const existing=await e.DB.prepare('SELECT product_id FROM ai_price_watch WHERE owner_user_id=?').bind(ownerId).all();
+  for(const row of existing.results||[]) if(!live.has(row.product_id)) await e.DB.batch([
+    e.DB.prepare('DELETE FROM ai_price_offers WHERE owner_user_id=? AND product_id=?').bind(ownerId,row.product_id),
+    e.DB.prepare('DELETE FROM ai_price_watch WHERE owner_user_id=? AND product_id=?').bind(ownerId,row.product_id)
+  ]);
   return state;
+}
+async function fetchHtml(url,{seller=false}={}) {
+  let target=new URL(url);
+  for(let redirects=0;redirects<4;redirects++) {
+    if(seller&&!approvedSellerUrl(target.href))throw new Error('Satıcı yönləndirməsi qəbul edilmir.');
+    const response=await fetch(target.href,{redirect:'manual',signal:AbortSignal.timeout(8000),headers:{'user-agent':'Mozilla/5.0 StockPilot/44','accept':'text/html','accept-language':'en-US,en;q=0.8'}});
+    if(response.status>=300&&response.status<400){const next=response.headers.get('location');if(!next)throw new Error('Yönləndirmə ünvanı yoxdur.');await response.body?.cancel();target=new URL(next,target);continue;}
+    if(!response.ok)throw new Error(`Mənbə cavabı: ${response.status}`);
+    if(!response.headers.get('content-type')?.includes('text/html'))throw new Error('HTML səhifə deyil.');
+    const reader=response.body.getReader(),chunks=[];let size=0;
+    try {while(true){const {value,done}=await reader.read();if(done)break;size+=value.length;if(size>1200000)throw new Error('Səhifə ölçüsü limitdən böyükdür.');chunks.push(value);}}finally{await reader.cancel().catch(()=>{});}
+    const data=new Uint8Array(size);let offset=0;for(const chunk of chunks){data.set(chunk,offset);offset+=chunk.length;}
+    return {html:new TextDecoder().decode(data),url:target.href};
+  }
+  throw new Error('Yönləndirmə limiti keçildi.');
 }
 function decodeHtml(text='') {
   return String(text).replace(/&amp;/g,'&').replace(/&quot;/g,'"').replace(/&#x27;|&#39;/g,"'").replace(/&lt;/g,'<').replace(/&gt;/g,'>').replace(/<[^>]+>/g,' ').replace(/\s+/g,' ').trim();
@@ -596,14 +675,12 @@ function ddgTarget(href) {
     const absolute = href.startsWith('//') ? `https:${href}` : href;
     const u = new URL(absolute, 'https://duckduckgo.com');
     const target = u.searchParams.get('uddg');
-    return target ? decodeURIComponent(target) : u.href;
+    return target || u.href;
   } catch { return ''; }
 }
 async function duckSearch(query) {
   const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-  const res = await fetch(url, { headers: { 'user-agent': 'Mozilla/5.0 StockPilotPriceMonitor/1.0', 'accept-language':'en-US,en;q=0.8' } });
-  if (!res.ok) return [];
-  const html = await res.text();
+  const {html}=await fetchHtml(url);
   const results = [];
   const re = /<a[^>]+class=["'][^"']*result__a[^"']*["'][^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
   let m;
@@ -617,9 +694,7 @@ async function duckSearch(query) {
 async function bingSearch(query) {
   try {
     const url=`https://www.bing.com/search?q=${encodeURIComponent(query)}&setlang=en-US`;
-    const res=await fetch(url,{headers:{'user-agent':'Mozilla/5.0 StockPilotPriceMonitor/1.0','accept-language':'en-US,en;q=0.8'}});
-    if(!res.ok) return [];
-    const html=await res.text();
+    const {html}=await fetchHtml(url);
     const out=[];
     const re=/<li[^>]+class=["'][^"']*b_algo[^"']*["'][\s\S]*?<h2>\s*<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
     let m;
@@ -628,7 +703,7 @@ async function bingSearch(query) {
       out.push({url:u.href,title:decodeHtml(m[2]),source:u.hostname.replace(/^www\./,'')});
     }
     return out;
-  } catch { return []; }
+  } catch(error) { throw error; }
 }
 function normalizeProductQuery(name='') {
   return String(name).replace(/[|]/g,' ').replace(/\s+/g,' ').trim();
@@ -636,10 +711,10 @@ function normalizeProductQuery(name='') {
 function productTokens(name='') {
   return normalizeProductQuery(name).toLowerCase().replace(/[^a-z0-9çğıöşü\s.-]/g,' ').split(/\s+/).filter(t=>t.length>=3 && !['the','and','for','with','gram','grams','powder'].includes(t));
 }
-function expectedWeight(name='', fallback=0) {
-  const m=String(name).match(/(?:^|\s)(\d{2,5})\s*(?:g|gr|gram|grams)\b/i);
-  return m ? Number(m[1]) : Number(fallback)||0;
+function weightsIn(text='') {
+  return [...String(text).matchAll(/(?:^|[^\d])(\d+(?:[.,]\d+)?)\s*(kg|kgs|kilograms?|g|gr|grams?|lbs?|oz)\b/gi)].map(m=>Number(m[1].replace(',','.'))*({kg:1000,kgs:1000,kilogram:1000,kilograms:1000,lb:453.592,lbs:453.592,oz:28.3495}[m[2].toLowerCase()]||1));
 }
+function expectedWeight(name='') { return weightsIn(name)[0]||0; }
 function trustedSourceScore(host='') {
   const h=String(host).toLowerCase().replace(/^www\./,'');
   const preferred=[
@@ -666,170 +741,150 @@ async function multiPriceSearch(productName, countryName='') {
     `site:amazon.com "${name}"`,
     `"${name}" ${countryName} buy price`,
     `"${name}" price`,
-  ].filter(Boolean).slice(0,5);
-  const merged=[];
+  ].filter(Boolean).slice(0,3);
+  const merged=[];let successes=0;
   for(const q of queries){
-    const [a,b]=await Promise.all([duckSearch(q),bingSearch(q)]);
-    merged.push(...a,...b);
+    const responses=await Promise.allSettled([duckSearch(q),bingSearch(q)]);
+    for(const response of responses)if(response.status==='fulfilled'){successes++;merged.push(...response.value);}
     if(merged.length>=40) break;
   }
-  const seen=new Set();
+  if(!successes)throw new Error("Axtarış mənbələrinə qoşulmaq alınmadı.");
+  const seen=new Set(),hostCounts=new Map();
   return merged.filter(r=>{
     try {
-      const u=approvedSellerUrl(r.url); if(!u) return false; const key=`${u.hostname}${u.pathname}`.replace(/\/$/,'');
+      const u=approvedSellerUrl(r.url); if(!u) return false; const key=u.href;
       if(seen.has(key)) return false; seen.add(key);
+      const count=hostCounts.get(u.hostname)||0;if(count>=2)return false;hostCounts.set(u.hostname,count+1);
       r.url=u.href; r.source=u.hostname.replace(/^www\./,'');
       return true;
     } catch{return false}
   }).sort((a,b)=>trustedSourceScore(b.source)-trustedSourceScore(a.source)).slice(0,26);
 }
-function pushPrice(out, raw, currency='', confidence=1, kind='structured') {
-  const cleaned=String(raw).trim().replace(/\s/g,'').replace(/,(?=\d{3}\b)/g,'').replace(',','.').replace(/[^0-9.]/g,'');
-  const n=Number(cleaned);
-  if(Number.isFinite(n)&&n>0&&n<100000) out.push({raw:n,currency:String(currency||'').toUpperCase(),confidence,kind});
+function parsePrice(raw) {
+  if(typeof raw==='number')return Number.isFinite(raw)&&raw>0?raw:null;
+  let text=String(raw).trim().replace(/[\s\u00a0]/g,'').replace(/^(?:USD|EUR|TRY|AZN|GBP|[$€₺₼£])|(?:USD|EUR|TRY|AZN|GBP|[$€₺₼£])$/gi,'');
+  if(!/^[0-9.,]+$/.test(text))return null;
+  const dot=text.lastIndexOf('.'),comma=text.lastIndexOf(',');
+  if(dot>=0&&comma>=0) {const decimal=dot>comma?'.':',';const grouping=decimal==='.'?',':'.';text=text.split(grouping).join('').replace(decimal,'.');}
+  else if(comma>=0)text=/^\d{1,3}(?:,\d{3})+$/.test(text)?text.replace(/,/g,''):text.replace(',','.');
+  else if((text.match(/\./g)||[]).length>1)text=/^\d{1,3}(?:\.\d{3})+$/.test(text)?text.replace(/\./g,''):'';
+  const n=Number(text);return n>0&&n<100000?n:null;
 }
-function structuredPriceCandidates(html, host='') {
-  const out=[];
-  // JSON-LD Product/Offer qiymətləri: ən etibarlı mənbə.
-  const scripts=[...String(html).matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)].slice(0,20);
-  for(const m of scripts){
+function pushPrice(out,raw,currency='',confidence=1,kind='structured') {const n=parsePrice(raw);if(n!==null)out.push({raw:n,currency:String(currency).toUpperCase(),confidence,kind});}
+function pageProductMatch(html,watch) {
+  const name=decodeHtml(`${(String(html).match(/<title[^>]*>([\s\S]*?)<\/title>/i)||[])[1]||''} ${(String(html).match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)||[])[1]||''}`);
+  return nameMatch(name,watch.product_name);
+}
+function nameMatch(candidate,wanted) {
+  const clean=x=>String(x).toLowerCase().normalize('NFKC');
+  const target=clean(wanted),text=clean(candidate);
+  const want=expectedWeight(target),weights=weightsIn(text);
+  if(want&&(!weights.length||weights.some(w=>Math.abs(w-want)>Math.max(5,want*.03))))return {ok:false,score:0};
+  const strip=x=>x.replace(/\d+(?:[.,]\d+)?\s*(?:kg|kgs|kilograms?|g|gr|grams?|lbs?|oz)\b/gi,'');
+  const tokens=productTokens(strip(target));
+  const words=new Set(productTokens(strip(text)));
+  const numbers=[...strip(target).matchAll(/\b\d+\b/g)].map(m=>m[0]);
+  if(numbers.some(n=>!new RegExp(`\\b${n}\\b`).test(strip(text))))return {ok:false,score:0};
+  const score=tokens.length?tokens.filter(t=>words.has(t)).length/tokens.length:0;
+  return {ok:score===1&&tokens.length>=2,score};
+}
+function structuredPriceCandidates(html,host='',watch=null,pageUrl='') {
+  const products=[];
+  for(const m of String(html).matchAll(/<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)) {
     try {
-      const data=JSON.parse(m[1].trim());
-      const nodes=Array.isArray(data)?data:[data];
-      const walk=(node)=>{
-        if(!node||typeof node!=='object') return;
-        const type=String(node['@type']||'').toLowerCase();
-        if(type.includes('offer')||type.includes('product')){
-          if(node.price!==undefined) pushPrice(out,node.price,node.priceCurrency||'',1,'jsonld');
-          if(node.lowPrice!==undefined) pushPrice(out,node.lowPrice,node.priceCurrency||'',.96,'jsonld-low');
-          if(node.offers) walk(node.offers);
-        }
-        for(const v of Object.values(node)) if(v&&typeof v==='object') Array.isArray(v)?v.forEach(walk):walk(v);
-      };
-      nodes.forEach(walk);
-    } catch{}
+      const walk=(node,depth=0)=>{if(!node||typeof node!=='object'||depth>12)return;
+        if(String(node['@type']||'').toLowerCase().split(',').some(t=>t==='product'))products.push(node);
+        for(const value of Object.values(node))if(value&&typeof value==='object')Array.isArray(value)?value.forEach(x=>walk(x,depth+1)):walk(value,depth+1);
+      };walk(JSON.parse(m[1]));
+    }catch{}
   }
-  const metaPatterns=[
-    /<meta[^>]+(?:property|name|itemprop)=["'](?:product:price:amount|og:price:amount|price)["'][^>]+content=["']([0-9.,]+)["'][^>]*>/gi,
-    /<meta[^>]+content=["']([0-9.,]+)["'][^>]+(?:property|name|itemprop)=["'](?:product:price:amount|og:price:amount|price)["'][^>]*>/gi,
-  ];
-  for(const re of metaPatterns){let m;while((m=re.exec(html))&&out.length<30) pushPrice(out,m[1],'',.92,'meta');}
-  const h=String(host).toLowerCase();
-  if(h.includes('amazon.')){
-    let m;
-    const re=/<span[^>]+class=["'][^"']*a-price-whole[^"']*["'][^>]*>([0-9.,]+)<\/span>[\s\S]{0,180}?<span[^>]+class=["'][^"']*a-price-fraction[^"']*["'][^>]*>([0-9]{2})<\/span>/gi;
-    while((m=re.exec(html))&&out.length<30) pushPrice(out,`${m[1]}.${m[2]}`,'USD',.9,'amazon-main');
+  const out=[];
+  for(const product of products) {
+    if(watch&&!nameMatch(product.name||'',watch.product_name).ok)continue;
+    const offers=Array.isArray(product.offers)?product.offers:[product.offers];
+    for(const offer of offers) {
+      if(!offer||typeof offer!=='object'||offer.price===undefined)continue; // no aggregate lowPrice across variants
+      const availability=String(offer.availability||'');
+      if(!/(?:^|\/)InStock$/i.test(availability))continue;
+      if(offer.itemCondition&&!/(?:^|\/)NewCondition$/i.test(offer.itemCondition))continue;
+      if(offer.priceValidUntil&&String(offer.priceValidUntil)<new Date().toISOString().slice(0,10))continue;
+      if(offer.url&&pageUrl){try {const offerUrl=new URL(offer.url,pageUrl),page=new URL(pageUrl);if(offerUrl.hostname!==page.hostname||offerUrl.pathname.replace(/\/$/,'')!==page.pathname.replace(/\/$/,''))continue;}catch{continue;}}
+      if(!/^(USD|EUR|TRY|AZN|GBP)$/.test(String(offer.priceCurrency||'').toUpperCase()))continue;
+      pushPrice(out,offer.price,offer.priceCurrency,1,'product-offer');
+    }
   }
   return out;
 }
-function detectedCurrency(html, fallbackSymbol) {
-  const m = html.match(/(?:priceCurrency|product:price:currency)[^A-Z]{0,20}(USD|EUR|AZN|TRY)/i);
-  if (m) return m[1].toUpperCase();
-  if (fallbackSymbol === '€') return 'EUR';
-  if (fallbackSymbol === '₼') return 'AZN';
-  if (fallbackSymbol === '₺') return 'TRY';
-  return 'USD';
+function currencyRateToAzn(code,state) {
+  if(code==='AZN')return 1;
+  if(Number(state.exchangeRates?.[code])>0)return Number(state.exchangeRates[code]);
+  const symbol={USD:'$',EUR:'€',TRY:'₺',GBP:'£'}[code];
+  const c=Object.values(state.countries||defaultAiCountries).find(c=>c.currency===symbol||c.currency===code);
+  return Number(c?.rate)>0?Number(c.rate):0;
 }
-function currencyRateToAzn(code, state, fallbackCountry) {
-  if (code === 'AZN') return 1;
-  const countries = Object.values(state.countries || defaultAiCountries);
-  if (code === 'EUR') { const x=countries.find(c=>c.currency==='€'); return Number(x?.rate)||1.96; }
-  if (code === 'USD') { const x=countries.find(c=>c.currency==='$'); return Number(x?.rate)||1.7; }
-  if (code === 'TRY') { const x=countries.find(c=>c.currency==='₺' || c.currency==='TRY'); return Number(x?.rate)||0; }
-  return Number(fallbackCountry?.rate)||0;
+function sellerCountry(url,code) {
+  const host=new URL(url).hostname;
+  if(/(?:trendyol|hepsiburada)\.com$/.test(host)&&code==='TRY')return 'turkey';
+  if(/(?:^|\.)(?:amazon|walmart|iherb|vitacost|bodybuilding|gnc|optimumnutrition|muscletech|dymatize|nowfoods)\.com$/.test(host)&&code==='USD')return 'america';
+  return null; // Do not invent a shipping origin from the old stock item.
 }
-function pageProductMatch(html, watch, resultTitle='') {
-  const text=decodeHtml(`${resultTitle} ${(String(html).match(/<title[^>]*>([\s\S]*?)<\/title>/i)||[])[1]||''} ${(String(html).match(/<h1[^>]*>([\s\S]*?)<\/h1>/i)||[])[1]||''}`).toLowerCase();
-  const tokens=productTokens(watch.product_name);
-  if(!tokens.length) return {ok:true,score:1};
-  const hit=tokens.filter(t=>text.includes(t)).length;
-  let score=hit/tokens.length;
-  const want=expectedWeight(watch.product_name,watch.weight_grams);
-  if(want){
-    const weights=[...text.matchAll(/(\d{2,5})\s*(?:g|gr|gram|grams)\b/gi)].map(m=>Number(m[1]));
-    if(weights.length){
-      const close=weights.some(w=>Math.abs(w-want)<=Math.max(10,want*.08));
-      if(close) score+=.25; else score-=.35;
-    }
+async function offerFromPage(result,state,watch) {
+  const url=approvedSellerUrl(result.url);if(!url)return null;
+  const {html,url:finalUrl}=await fetchHtml(url.href,{seller:true});
+  if(!pageProductMatch(html,watch).ok)return null;
+  const candidates=structuredPriceCandidates(html,new URL(finalUrl).hostname,watch,finalUrl);
+  const offers=[];
+  for(const candidate of candidates) {
+    const rate=currencyRateToAzn(candidate.currency,state),origin=sellerCountry(finalUrl,candidate.currency);
+    if(!rate)throw new Error(`${candidate.currency} məzənnəsi təyin edilməyib.`);
+    if(!origin)continue;
+    const c=aiCountry(state,origin);
+    const shipping=D.round(aiShipping(watch.weight_grams,c)*Number(c.rate));
+    const product=D.round(candidate.raw*rate);
+    offers.push({title:watch.product_name,url:finalUrl,source:new URL(finalUrl).hostname,productPriceAzn:product,shippingAzn:shipping,totalAzn:D.round(product+shipping),currency:candidate.currency,rawPrice:candidate.raw,priceKind:candidate.kind,sourceScore:trustedSourceScore(new URL(finalUrl).hostname)});
   }
-  return {ok:score>=.55,score};
-}
-async function offerFromPage(result, state, watch) {
-  const url=approvedSellerUrl(result.url); if(!url) return null;
-  try {
-    const res=await fetch(url.href,{redirect:'follow',headers:{'user-agent':'Mozilla/5.0 (compatible; StockPilotPriceVerifier/2.0)','accept':'text/html,application/xhtml+xml','accept-language':'en-US,en;q=0.8'}});
-    if(!res.ok) return null;
-    const type=res.headers.get('content-type')||''; if(!type.includes('text/html')) return null;
-    const html=(await res.text()).slice(0,1200000);
-    const match=pageProductMatch(html,watch,result.title||'');
-    if(!match.ok) return null;
-    const country=aiCountry(state,watch.country_key);
-    const candidates=structuredPriceCandidates(html,url.hostname);
-    if(!candidates.length) return null;
-    const fallbackCode=detectedCurrency(html,country.currency);
-    const converted=[];
-    for(const c of candidates){
-      const code=c.currency||fallbackCode; const rate=currencyRateToAzn(code,state,country);
-      if(rate>0) converted.push({...c,code,azn:c.raw*rate});
-    }
-    if(!converted.length) return null;
-    // Main offer qiymətini seç: structured confidence + məntiqli qiymət aralığı.
-    const current=Number(watch.current_total_azn)||0;
-    const lower=current>0 ? Math.max(3,current*.28) : 3;
-    const upper=current>0 ? Math.max(150,current*3.5) : 500;
-    const plausible=converted.filter(x=>x.azn>=lower&&x.azn<=upper).sort((a,b)=>b.confidence-a.confidence || a.azn-b.azn);
-    if(!plausible.length) return null;
-    const pick=plausible[0];
-    const shipping=Math.round(aiShipping(watch.weight_grams,country)*(Number(country.rate)||1)*100)/100;
-    const product=Math.round(pick.azn*100)/100, total=Math.round((product+shipping)*100)/100;
-    return {
-      title:result.title||watch.product_name,url:url.href,source:result.source||url.hostname,
-      productPriceAzn:product,shippingAzn:shipping,totalAzn:total,currency:pick.code,rawPrice:pick.raw,
-      verified:true,sourceScore:trustedSourceScore(url.hostname),matchScore:Math.round(match.score*100)/100,priceKind:pick.kind
-    };
-  } catch { return null; }
+  return offers.sort((a,b)=>a.totalAzn-b.totalAzn)[0]||null;
 }
 async function scanAiProduct(e, ownerId, productId, {notify=true,sync=true}={}) {
   const state=sync ? await syncAiWatches(e,ownerId) : await readState(e,ownerId);
   const watch=await e.DB.prepare('SELECT * FROM ai_price_watch WHERE owner_user_id=? AND product_id=?').bind(ownerId,productId).first();
   if(!watch) return { error:'Məhsul izləmədə tapılmadı.' };
-  const country=aiCountry(state,watch.country_key);
-  const results=await multiPriceSearch(watch.product_name,country.name||'');
-  const offers=[];
-  for(const result of results.slice(0,5)){ const offer=await offerFromPage(result,state,watch); if(offer) offers.push(offer); }
-  offers.sort((a,b)=>(b.sourceScore||0)-(a.sourceScore||0) || a.totalAzn-b.totalAzn);
-  await e.DB.prepare('DELETE FROM ai_price_offers WHERE owner_user_id=? AND product_id=?').bind(ownerId,productId).run();
-  for(const o of offers.slice(0,5)){ await e.DB.prepare(`INSERT INTO ai_price_offers(id,owner_user_id,product_id,title,url,source,product_price_azn,shipping_azn,total_azn,currency,raw_price) VALUES(?,?,?,?,?,?,?,?,?,?,?)`).bind(crypto.randomUUID(),ownerId,productId,String(o.title).slice(0,300),String(o.url).slice(0,1500),String(o.source).slice(0,150),o.productPriceAzn,o.shippingAzn,o.totalAzn,o.currency,o.rawPrice).run(); }
-  const oldBest=Number(watch.best_total_azn)||0;
-  const trustedOffers=offers.filter(o=>(o.sourceScore||0)>=80);
-  const best=(trustedOffers.length?trustedOffers:offers).slice().sort((a,b)=>a.totalAzn-b.totalAzn)[0]||null, now=new Date().toISOString();
-  if(best){
-    await e.DB.prepare(`UPDATE ai_price_watch SET last_scan_at=?,best_total_azn=?,best_product_azn=?,best_shipping_azn=?,best_title=?,best_url=?,best_source=?,updated_at=CURRENT_TIMESTAMP WHERE owner_user_id=? AND product_id=?`).bind(now,best.totalAzn,best.productPriceAzn,best.shippingAzn,String(best.title).slice(0,300),String(best.url).slice(0,1500),String(best.source).slice(0,150),ownerId,productId).run();
-    const current=Number(watch.current_total_azn)||0, threshold=Math.max(0,Number(watch.threshold_pct)||8);
-    const savings=current>0?((current-best.totalAzn)/current)*100:0;
-    const materiallyNew=!oldBest || best.totalAzn < oldBest-0.05;
-    if(notify && materiallyNew && savings>=threshold){
-      await notification(e,ownerId,'ai-price',`AI alış: ${watch.product_name}`,`${best.totalAzn.toFixed(2)} ₼ (karqo daxil) · ${savings.toFixed(1)}% qənaət`,{productId,bestUrl:best.url,totalAzn:best.totalAzn,savingsPct:Math.round(savings*10)/10});
-    }
-  } else {
-    await e.DB.prepare('UPDATE ai_price_watch SET last_scan_at=?,updated_at=CURRENT_TIMESTAMP WHERE owner_user_id=? AND product_id=?').bind(now,ownerId,productId).run();
+  if(!watch.enabled)return {status:'disabled',offers:[],best:null};
+  if(Number(e.FX_TRY_AZN)>0)state.exchangeRates={...(state.exchangeRates||{}),TRY:Number(e.FX_TRY_AZN)};
+  const country=aiCountry(state,watch.country_key),offers=[],errors=[];
+  let results=[];
+  try {results=await multiPriceSearch(watch.product_name,country.name||'');}catch(error){errors.push(String(error.message));}
+  for(const result of results.slice(0,8)) {
+    try {const offer=await offerFromPage(result,state,watch);if(offer)offers.push(offer);}catch(error){errors.push(String(error.message));}
   }
-  return { watch:{...watch,last_scan_at:now}, offers, best };
+  offers.sort((a,b)=>a.totalAzn-b.totalAzn);
+  const best=offers[0]||null,now=new Date().toISOString();
+  const status=best?'found':errors.length?'error':'no_match';
+  const error=errors.length?[...new Set(errors)].join(' · ').slice(0,400):'';
+  const statements=[e.DB.prepare('DELETE FROM ai_price_offers WHERE owner_user_id=? AND product_id=?').bind(ownerId,productId)];
+  for(const o of offers.slice(0,5))statements.push(e.DB.prepare('INSERT INTO ai_price_offers(id,owner_user_id,product_id,title,url,source,product_price_azn,shipping_azn,total_azn,currency,raw_price) VALUES(?,?,?,?,?,?,?,?,?,?,?)').bind(crypto.randomUUID(),ownerId,productId,o.title,o.url,o.source,o.productPriceAzn,o.shippingAzn,o.totalAzn,o.currency,o.rawPrice));
+  statements.push(e.DB.prepare(`UPDATE ai_price_watch SET last_scan_at=?,best_total_azn=?,best_product_azn=?,best_shipping_azn=?,best_title=?,best_url=?,best_source=?,scan_status=?,scan_error=?,updated_at=CURRENT_TIMESTAMP WHERE owner_user_id=? AND product_id=?`).bind(now,best?.totalAzn??null,best?.productPriceAzn??null,best?.shippingAzn??null,best?.title??null,best?.url??null,best?.source??null,status,error,ownerId,productId));
+  await e.DB.batch(statements);
+  const oldBest=Number(watch.best_total_azn)||0,current=Number(watch.current_total_azn)||0;
+  const threshold=Number.isFinite(Number(watch.threshold_pct))?Number(watch.threshold_pct):8;
+  const savings=best&&current>0?((current-best.totalAzn)/current)*100:0;
+  if(notify&&best&&(!oldBest||best.totalAzn<oldBest-.05)&&savings>=threshold)await notification(e,ownerId,'ai-price',`Qiymət monitoru: ${watch.product_name}`,`${best.totalAzn.toFixed(2)} ₼ təxmini · ${savings.toFixed(1)}% fərq; əlavə xərcləri satıcıda yoxlayın.`,{productId,bestUrl:best.url,totalAzn:best.totalAzn}).catch(()=>{});
+  return {status,error,offers,best};
 }
 async function aiPurchasePayload(e,ownerId){
   const state=await syncAiWatches(e,ownerId);
-  const rows=await e.DB.prepare('SELECT * FROM ai_price_watch WHERE owner_user_id=? ORDER BY enabled DESC, updated_at DESC').bind(ownerId).all();
+  const rows=await e.DB.prepare('SELECT * FROM ai_price_watch WHERE owner_user_id=? ORDER BY product_id ASC').bind(ownerId).all();
   const watches=[];
   for(const w of rows.results||[]){
     const offerRows=await e.DB.prepare('SELECT title,url,source,product_price_azn,shipping_azn,total_azn,currency,raw_price,found_at FROM ai_price_offers WHERE owner_user_id=? AND product_id=? ORDER BY total_azn ASC LIMIT 5').bind(ownerId,w.product_id).all();
-    watches.push({ productId:w.product_id,productName:w.product_name,countryKey:w.country_key,weightGrams:Number(w.weight_grams)||0,currentTotalAzn:Number(w.current_total_azn)||0,enabled:Boolean(w.enabled),thresholdPct:Number(w.threshold_pct)||0,lastScanAt:w.last_scan_at,bestTotalAzn:Number(w.best_total_azn)||0,bestProductAzn:Number(w.best_product_azn)||0,bestShippingAzn:Number(w.best_shipping_azn)||0,bestTitle:w.best_title||'',bestUrl:w.best_url||'',bestSource:w.best_source||'',offers:(offerRows.results||[]).map(o=>({title:o.title,url:o.url,source:o.source,productPriceAzn:Number(o.product_price_azn),shippingAzn:Number(o.shipping_azn),totalAzn:Number(o.total_azn),currency:o.currency,rawPrice:Number(o.raw_price),foundAt:o.found_at})) });
+    watches.push({ productId:w.product_id,productName:w.product_name,countryKey:w.country_key,weightGrams:Number(w.weight_grams)||0,currentTotalAzn:Number(w.current_total_azn)||0,enabled:Boolean(w.enabled),thresholdPct:Number(w.threshold_pct)||0,scanStatus:w.scan_status,scanError:w.scan_error,lastScanAt:w.last_scan_at,bestTotalAzn:Number(w.best_total_azn)||0,bestProductAzn:Number(w.best_product_azn)||0,bestShippingAzn:Number(w.best_shipping_azn)||0,bestTitle:w.best_title||'',bestUrl:w.best_url||'',bestSource:w.best_source||'',offers:(offerRows.results||[]).map(o=>({title:o.title,url:o.url,source:o.source,productPriceAzn:Number(o.product_price_azn),shippingAzn:Number(o.shipping_azn),totalAzn:Number(o.total_azn),currency:o.currency,rawPrice:Number(o.raw_price),foundAt:o.found_at})) });
   }
   return { watches, countries:state.countries||defaultAiCountries };
 }
 async function scanAllAiWatches(e){
   await ensureAiPurchaseSchema(e);
-  const rows=await e.DB.prepare("SELECT owner_user_id,product_id FROM ai_price_watch WHERE enabled=1 ORDER BY COALESCE(last_scan_at,'1970-01-01') ASC LIMIT 3").all();
-  for(const row of rows.results||[]){ try{ await scanAiProduct(e,row.owner_user_id,row.product_id,{notify:true,sync:false}); }catch{} }
+  const rows=await e.DB.prepare("SELECT owner_user_id,product_id FROM ai_price_watch WHERE enabled=1 AND (last_scan_at IS NULL OR julianday(last_scan_at)<julianday('now','-6 hours')) ORDER BY COALESCE(last_scan_at,'1970-01-01') ASC LIMIT 3").all();
+  for(const row of rows.results||[]){ try{ await scanAiProduct(e,row.owner_user_id,row.product_id,{notify:true,sync:false}); }catch(error){console.warn('scheduled scan failed',String(error.message));} }
 }
 
 let securitySchemaReady;
@@ -926,11 +981,13 @@ function approvedSellerUrl(raw) {
 }
 
 export default {
-  async fetch(r, e) {
+  async fetch(r, e, ctx) {
+    try {
     const u = new URL(r.url),
       p = u.pathname;
     if (p.startsWith("/api/") && !e.AUTH_SECRET) return fail("Server security secret konfiqurasiya olunmayıb.", 503);
     if (p.startsWith("/api/") && !validRequestOrigin(r)) return fail("Sorğunun mənbəyi qəbul edilmir.", 403);
+    if (p.startsWith("/api/") && p !== "/api/version") await ensureOperations(e);
     if (p.startsWith("/api/images/")) {
       if (!e.IMAGES) return new Response("Not found", { status: 404 });
       let key;
@@ -1110,8 +1167,9 @@ export default {
       if (!owner) return fail("Mağaza tapılmadı.", 404);
       let body; try { body = await safeJson(r, 10000); } catch { return fail("Sorğu düzgün deyil."); }
       const lat = Number(body.lat), lng = Number(body.lng), preferredAt = String(body.preferredAt || "");
-      if (!Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) return fail("Çatdırılma konumu düzgün deyil.");
+      if (body.lat === null || body.lat === "" || body.lng === null || body.lng === "" || !Number.isFinite(lat) || lat < -90 || lat > 90 || !Number.isFinite(lng) || lng < -180 || lng > 180) return fail("Çatdırılma konumu düzgün deyil.");
       if (!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::\d{2})?$/.test(preferredAt)) return fail("Çatdırılma vaxtı düzgün deyil.");
+      const scheduleError=D.scheduleError(preferredAt); if(scheduleError)return fail(scheduleError);
       return json(await calculateDeliveryQuote(e, owner.id, lat, lng, preferredAt));
     }
     const storeTrackMatch = p.match(/^\/api\/store\/([\w.-]{3,30})\/orders\/([0-9a-fA-F-]{36})$/);
@@ -1150,47 +1208,61 @@ export default {
       const owner = await e.DB.prepare("SELECT * FROM users WHERE username=? COLLATE NOCASE").bind(storeOrderMatch[1]).first();
       if (!owner) return fail("Mağaza tapılmadı.", 404);
       let body; try { body = await safeJson(r, 100000); } catch (error) { return fail(error.message === 'PAYLOAD_TOO_LARGE' ? "Sifariş çox böyükdür." : "JSON düzgün deyil.", error.message === 'PAYLOAD_TOO_LARGE' ? 413 : 400); }
+      const requestKey=String(r.headers.get('idempotency-key')||'');
+      if(!/^[a-zA-Z0-9-]{16,80}$/.test(requestKey))return fail('Sifariş açarı yoxdur. Səhifəni yeniləyin.');
+      const bodyHash=await stateVersion(JSON.stringify(body));
+      const existing=await e.DB.prepare('SELECT order_id,body_hash FROM checkout_keys WHERE owner_user_id=? AND request_key=?').bind(owner.id,requestKey).first();
+      if(existing) return existing.body_hash===bodyHash?json({ok:true,orderId:existing.order_id}):fail('Sifariş açarı başqa məzmuna aiddir.',409);
       const name = String(body.name || "").trim().slice(0, 100);
       const phone = String(body.phone || "").trim().slice(0, 30);
       const phoneDigits = phone.replace(/\D/g, '');
       if (!name || phoneDigits.length < 7 || phoneDigits.length > 15 || !Array.isArray(body.cart) || !body.cart.length) return fail("Ad, telefon və məhsullar tələb olunur.");
       if (body.cart.length > 100) return fail("Bir sifarişdə maksimum 100 fərqli məhsul ola bilər.");
-      const products = productList(await readState(e, owner.id));
+      const checkoutState=await readState(e,owner.id);
+      const products = productList(checkoutState);
       const cart = [];
       const seen = new Map();
       for (const line of body.cart) {
         const id = String(line?.id || '').slice(0, 200);
         const rawQty = Number(line?.quantity);
-        const quantity = Number.isInteger(rawQty) ? rawQty : Math.floor(rawQty);
-        if (!id || !Number.isFinite(quantity) || quantity < 1 || quantity > 999) return fail("Məhsul sayı düzgün deyil.");
-        seen.set(id, Math.min(999, (seen.get(id) || 0) + quantity));
+        const quantity = rawQty;
+        if (!id || !Number.isInteger(quantity) || quantity < 1 || quantity > 999) return fail("Məhsul sayı düzgün deyil.");
+        if((seen.get(id)||0)+quantity>999)return fail("Məhsul sayı 999-dan çox ola bilməz.");
+        seen.set(id, (seen.get(id)||0)+quantity);
       }
       for (const [id, quantity] of seen) {
         const product = products.find((x) => String(x.id) === id);
         if (!product) return fail("Məhsul tapılmadı.", 404);
-        cart.push({ ...product, price: Math.max(0, Number(product.price) || 0), quantity });
+        const source=checkoutState.orders.find(o=>String(o.id)===String(product.orderId))?.items?.[product.index];
+        cart.push({ ...product, price: Math.max(0, Number(product.price) || 0), quantity, unitCostAzn:D.unitCost(source,checkoutState) });
       }
       const preferredAt = String(body.preferredAt || "").slice(0, 40);
       if (!/^\d{4}-\d{2}-\d{2}T(?:[01]\d|2[0-3]):[0-5]\d(?::\d{2})?$/.test(preferredAt)) return fail("Çatdırılma tarix və saatını 24 saat formatında yazın.");
-      if (preferredAt.slice(0, 10) < new Date().toISOString().slice(0, 10)) return fail("Keçmiş tarix seçilə bilməz.");
-      const delivery = String(body.delivery || "metro");
-      if (!['metro','address'].includes(delivery)) return fail("Çatdırılma üsulu düzgün deyil.");
-      const payment = String(body.payment || "cash");
-      if (!['cash','card'].includes(payment)) return fail("Ödəniş üsulu düzgün deyil.");
-      const preferredMs = Date.parse(preferredAt);
-      if (!Number.isFinite(preferredMs) || preferredMs > Date.now() + 366 * 86400000) return fail("Çatdırılma tarixi həddən artıq uzaqdır.");
+      const scheduleError=D.scheduleError(preferredAt);if(scheduleError)return fail(scheduleError);
+      const delivery = String(body.delivery || 'metro');
+      const payment = String(body.payment || 'cash');
+      if(!['metro','address'].includes(delivery)||!['cash','card'].includes(payment))return fail('Çatdırılma və ya ödəniş üsulu düzgün deyil.');
+      if(delivery==='metro'&&!String(body.metro||'').trim())return fail('Metro seçin.');
+      if(delivery==='address'&&!String(body.address||'').trim())return fail('Ünvanı yazın.');
       let deliveryFee = 0, deliveryDistanceKm = 0, deliveryPeriodLabel = "";
       let deliveryLat = null, deliveryLng = null;
       if (delivery === "address") {
         deliveryLat = Number(body.deliveryLat); deliveryLng = Number(body.deliveryLng);
-        if (!Number.isFinite(deliveryLat) || deliveryLat < -90 || deliveryLat > 90 || !Number.isFinite(deliveryLng) || deliveryLng < -180 || deliveryLng > 180) return fail("Çatdırılma konumunu xəritədən seçin.");
+        if (body.deliveryLat == null || body.deliveryLat === "" || body.deliveryLng == null || body.deliveryLng === "" || !Number.isFinite(deliveryLat) || deliveryLat < -90 || deliveryLat > 90 || !Number.isFinite(deliveryLng) || deliveryLng < -180 || deliveryLng > 180) return fail("Çatdırılma konumunu xəritədən seçin.");
         const quote = await calculateDeliveryQuote(e, owner.id, deliveryLat, deliveryLng, preferredAt);
         deliveryFee = quote.fee; deliveryDistanceKm = quote.distanceKm; deliveryPeriodLabel = quote.periodLabel;
       }
       const subtotal = cart.reduce((s, x) => s + x.price * x.quantity, 0);
-      const order = { id: crypto.randomUUID(), customer: { name, phone, note: String(body.note || "").trim().slice(0, 500), delivery, metro: String(body.metro || "").trim().slice(0, 120), address: String(body.address || "").trim().slice(0, 300), payment, preferredAt, deliveryLat, deliveryLng }, cart, subtotal, deliveryFee, deliveryDistanceKm, deliveryPeriodLabel, total: subtotal + deliveryFee, createdAt: new Date().toISOString() };
-      await e.DB.prepare("INSERT INTO customer_orders(id,owner_user_id,order_json,status) VALUES(?,?,?,?)").bind(order.id, owner.id, JSON.stringify(order), "new").run();
-      await notification(e, owner.id, "customer-order", "Yeni müştəri sifarişi", `${name} · ${order.total.toFixed(2)} ₼`, { orderId: order.id });
+      const order = { id: crypto.randomUUID(), customer: { name, phone, note: String(body.note || "").trim().slice(0, 500), delivery, metro: String(body.metro || "").trim().slice(0, 120), address: String(body.address || "").trim().slice(0, 300), payment, preferredAt, deliveryLat, deliveryLng }, cart, subtotal, deliveryFee, deliveryDistanceKm, deliveryPeriodLabel, total: D.round(subtotal + deliveryFee), createdAt: new Date().toISOString() };
+      try { await e.DB.batch([
+        e.DB.prepare('INSERT INTO checkout_keys(owner_user_id,request_key,order_id,body_hash) VALUES(?,?,?,?)').bind(owner.id,requestKey,order.id,bodyHash),
+        e.DB.prepare('INSERT INTO customer_orders(id,owner_user_id,order_json,status) VALUES(?,?,?,?)').bind(order.id,owner.id,JSON.stringify(order),'new')
+      ]); } catch(error) {
+        const duplicate=await e.DB.prepare('SELECT order_id,body_hash FROM checkout_keys WHERE owner_user_id=? AND request_key=?').bind(owner.id,requestKey).first();
+        if(duplicate?.body_hash===bodyHash)return json({ok:true,orderId:duplicate.order_id});
+        throw error;
+      }
+      await notification(e,owner.id,'customer-order','Yeni müştəri sifarişi',`${name} · ${order.total.toFixed(2)} ₼`,{orderId:order.id}).catch(error=>console.warn('notification failed',String(error?.message)));
       return json({ ok: true, orderId: order.id }, 201);
     }
     const user = await who(r, e);
@@ -1200,13 +1272,18 @@ export default {
     }
     if (p === "/api/ai-purchases/scan-all" && r.method === "POST") {
       if (!user) return fail("Giriş tələb olunur.", 401);
-      const rl = await checkRateLimit(r, e, "ai-scan-all", { limit: 6, windowSec: 3600, subject: user.id });
+      const rl = await checkRateLimit(r, e, "ai-scan-all", { limit: 120, windowSec: 3600, subject: user.id });
       if (!rl.allowed) return rateLimited(rl);
-      const payload=await aiPurchasePayload(e,user.id);
-      const enabled=payload.watches.filter(w=>w.enabled).slice(0,3);
-      const results=[];
-      for(const w of enabled){ try{ results.push(await scanAiProduct(e,user.id,w.productId,{notify:true,sync:false})); }catch(err){ results.push({productId:w.productId,error:String(err?.message||err)}); } }
-      return json({ok:true,scanned:results.length});
+      let body;try{body=await safeJson(r,5000);}catch{return fail('Sorğu düzgün deyil.');}
+      const offset=Number(body.offset||0);if(!Number.isSafeInteger(offset)||offset<0)return fail('Səhifə nömrəsi düzgün deyil.');
+      if(offset===0)await syncAiWatches(e,user.id);
+      const rows=await e.DB.prepare('SELECT product_id FROM ai_price_watch WHERE owner_user_id=? AND enabled=1 ORDER BY product_id ASC').bind(user.id).all();
+      const all=(rows.results||[]).map(r=>({productId:r.product_id})),results=[];
+      for(const w of all.slice(offset,offset+1)) {
+        try{results.push({productId:w.productId,...await scanAiProduct(e,user.id,w.productId,{notify:true,sync:false})});}
+        catch(error){results.push({productId:w.productId,status:'error',error:String(error.message)});}
+      }
+      return json({ok:true,scanned:results.filter(x=>x.status!=='error').length,failed:results.filter(x=>x.status==='error').length,results,total:all.length,nextOffset:offset+1<all.length?offset+1:null});
     }
     const aiScanMatch=p.match(/^\/api\/ai-purchases\/([^/]+)\/scan$/);
     if(aiScanMatch && r.method === "POST") {
@@ -1273,14 +1350,16 @@ export default {
       let passwordSalt = user.salt;
       let passwordIterations = Number(user.password_iterations) || LEGACY_PASSWORD_ITERATIONS;
       if (newPassword) {
+        const rl=await checkRateLimit(r,e,"profile-password",{limit:10,windowSec:900,subject:user.id});
+        if(!rl.allowed) return rateLimited(rl);
         if (!/^\d{4}$/.test(newPassword))
           return fail("Yeni şifrə 4 rəqəm olmalıdır.");
         let currentOk = await verifyPinV3(currentPassword, user.password_hash, e.AUTH_SECRET);
         if (currentOk === null) currentOk = (await verifyPassword(currentPassword, user.salt, user.password_hash, user.password_iterations)).ok;
         if (!currentOk) return fail("Hazırkı şifrə yanlışdır.", 401);
         passwordSalt = b64(crypto.getRandomValues(new Uint8Array(16)));
-        passwordIterations = PASSWORD_ITERATIONS;
-        passwordHash = await hashPassword(newPassword, passwordSalt, passwordIterations);
+        passwordIterations = 0;
+        passwordHash = await hashPinV3(newPassword, passwordSalt, e.AUTH_SECRET);
       }
       const profileColumns = await userColumns(e);
       if (profileColumns.has('password_iterations')) {
@@ -1306,19 +1385,26 @@ export default {
     }
     if (p === "/api/state") {
       if (!user) return fail("Giriş tələb olunur.", 401);
-      if (r.method === "GET") return json({ state: await readState(e, user.id) });
+      if (r.method === "GET") { const {state,version}=await stateSnapshot(e,user.id); return json({state,version}); }
       if (r.method === "PUT") {
         let body;
         try { body = await safeJson(r, 8_500_000); } catch (error) { return fail(error.message === 'PAYLOAD_TOO_LARGE' ? "Məlumat ölçüsü çox böyükdür." : "JSON düzgün deyil.", error.message === 'PAYLOAD_TOO_LARGE' ? 413 : 400); }
         const state = body?.state;
+        if(state&&typeof state==='object')delete state.customerOrders;
         const validationError = validateState(state);
         if (validationError) return fail(validationError);
-        await e.DB.prepare(
-          "INSERT INTO user_state(user_id,state_json,updated_at) VALUES(?,?,CURRENT_TIMESTAMP) ON CONFLICT(user_id) DO UPDATE SET state_json=excluded.state_json,updated_at=CURRENT_TIMESTAMP",
-        )
-          .bind(user.id, JSON.stringify(state))
-          .run();
-        return json({ ok: true });
+        const snapshot=await stateSnapshot(e,user.id);
+        if(body.version!==snapshot.version) return fail('Məlumat başqa səhifədə dəyişib. Səhifəni yeniləyin; yerli dəyişikliklər saxlanmadı.',409,{code:'STATE_CONFLICT'});
+        // Customer sales are server-owned; stale/modified clients cannot rewrite the ledger.
+        state.customerSales=snapshot.state.customerSales||[];
+        delete state.customerOrders;
+        D.normalize(state);
+        const raw=JSON.stringify(state);
+        let result;
+        if(snapshot.raw===null) result=await e.DB.prepare('INSERT OR IGNORE INTO user_state(user_id,state_json) VALUES(?,?)').bind(user.id,raw).run();
+        else result=await e.DB.prepare('UPDATE user_state SET state_json=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=? AND state_json=?').bind(raw,user.id,snapshot.raw).run();
+        if(!result.meta.changes) return fail('Məlumat dəyişib. Səhifəni yeniləyin.',409,{code:'STATE_CONFLICT'});
+        return json({ok:true,version:await stateVersion(raw)});
       }
     }
     if (p === "/api/customer-orders" && r.method === "GET") {
@@ -1397,42 +1483,69 @@ export default {
         if (!order.customer.name || !order.customer.phone)
           return fail("Müştərinin adı və telefonu tələb olunur.");
       }
+      if(body.customer) {
+        if(!['metro','address'].includes(order.customer.delivery)||!['cash','card'].includes(order.customer.payment))return fail('Çatdırılma və ödəniş üsulu düzgün deyil.');
+        const previous=JSON.parse(row.order_json).customer;
+        if(order.customer.delivery!==previous.delivery) return fail('Çatdırılma üsulunun dəyişməsi yeni qiymət və konum tələb edir. Yeni sifariş yaradın.',409);
+        if(order.customer.preferredAt!==previous.preferredAt) {
+          const error=D.scheduleError(order.customer.preferredAt);if(error)return fail(error);
+          if(['delivered','cancelled'].includes(row.status))return fail('Bitmiş sifarişin vaxtı dəyişdirilə bilməz.',409);
+          if(order.customer.delivery==='address') {
+            const quote=await calculateDeliveryQuote(e,user.id,order.customer.deliveryLat,order.customer.deliveryLng,order.customer.preferredAt);
+            order.deliveryFee=quote.fee;order.deliveryDistanceKm=quote.distanceKm;order.deliveryPeriodLabel=quote.periodLabel;order.total=D.round(order.subtotal+quote.fee);
+          }
+        }
+      }
+      let inventorySnapshot=null;
       if (status === 'delivered' && row.status !== 'delivered' && !order.inventoryAppliedAt) {
-        const state = await readState(e, user.id);
+        inventorySnapshot=await stateSnapshot(e,user.id);
+        const state=inventorySnapshot.state;
         state.customerSales = Array.isArray(state.customerSales) ? state.customerSales : [];
         for (const line of order.cart || []) {
+          let matched=false;
           for (const ownerOrder of state.orders || []) for (let i = 0; i < (ownerOrder.items || []).length; i++) {
             const item = ownerOrder.items[i], itemId = item.id || `${ownerOrder.id}:${i}`;
             if (String(itemId) === String(line.id)) {
+              matched=true;
               const deliveredQty = Math.max(0, Number(line.quantity) || 0);
               if (!deliveredQty) continue;
               item.acquiredQty = Number(item.acquiredQty ?? item.qty) || 0;
-              item.qty = Math.max(0, (Number(item.qty) || 0) - deliveredQty);
+              const cost=Number.isFinite(Number(line.unitCostAzn))?Number(line.unitCostAzn):D.unitCost(item,state);
+              item.qty = Math.max(0, D.remaining(item) - deliveredQty);
               state.customerSales.push({
                 id: crypto.randomUUID(), customerOrderId: customerMatch[1], orderId: ownerOrder.id,
-                itemId, name: item.name || line.name || "Məhsul", quantity: deliveredQty, sales: (Number(item.sale) || 0) * deliveredQty,
-                purchase: ((Number(item.price) || 0) * deliveredQty) * (item.country === "spain" ? 1.96 : 1.7),
+                itemId, name: item.name || line.name || "Məhsul", quantity: deliveredQty, sales: D.round((Number(line.price) || 0) * deliveredQty),
+                purchase: D.round(cost * deliveredQty),
                 soldAt: new Date().toISOString(),
               });
             }
           }
+          if(!matched) return fail('Sifarişdəki məhsul silinib. Tamamlamaq üçün məhsulu bərpa edin.',409);
         }
-        await e.DB.prepare("UPDATE user_state SET state_json=?,updated_at=CURRENT_TIMESTAMP WHERE user_id=?").bind(JSON.stringify(state), user.id).run();
         order.inventoryAppliedAt = new Date().toISOString();
       }
-      await e.DB.prepare("UPDATE customer_orders SET order_json=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND owner_user_id=?").bind(JSON.stringify(order), status, customerMatch[1], user.id).run();
+      if(!await commitCustomerChange(e,user.id,customerMatch[1],row,order,status,inventorySnapshot)) return fail('Sifariş və ya stok dəyişib. Yeniləyib təkrar cəhd edin.',409);
       const messageSent = status !== row.status ? await sendWhatsAppStatus(e, order, status).catch(() => false) : false;
-      if (status !== row.status) await notification(e, user.id, "order-status", `Sifariş statusu: ${whatsappStatuses[status] || status}`, `${order.customer?.name || "Müştəri"} · ${order.total?.toFixed?.(2) || order.total || 0} ₼`, { orderId: customerMatch[1], status });
+      if (status !== row.status) await notification(e, user.id, "order-status", `Sifariş statusu: ${whatsappStatuses[status] || status}`, `${order.customer?.name || "Müştəri"} · ${order.total?.toFixed?.(2) || order.total || 0} ₼`, { orderId: customerMatch[1], status }).catch(error=>console.warn("notification failed",String(error?.message)));
       return json({ ok: true, messageSent, whatsappUrl: whatsappUrl(order, status), order: { ...order, status } });
     }
+    if(p.startsWith('/api/')) return fail('API tapılmadı.',404);
+    if(!/^(?:\/|\/(?:[a-z0-9-]+\.(?:html|css|js|png|webmanifest))|\/(?:index|login|register|dashboard|customer-orders|inventory|account|profile|notifications|ai-purchases|store|order-track|order-success|cargo))$/.test(p) || /\/(?:worker|domain-test)\.js$/.test(p)) return new Response('Not found',{status:404});
     const asset = await e.ASSETS.fetch(r);
     const headers = new Headers(asset.headers);
     const type = headers.get("content-type") || "";
     applySecurityHeaders(headers, { html: type.includes("text/html") });
     if (type.includes("text/html")) headers.set("cache-control", "no-cache");
+    if(type.includes('javascript') || type.includes('css')) headers.set('cache-control','no-cache');
     return new Response(asset.body, { status: asset.status, statusText: asset.statusText, headers });
+    } catch(error) {
+      const requestId=crypto.randomUUID();
+      console.error('request failed',{requestId,message:String(error?.message||error)});
+      return fail(error?.message==='STATE_CORRUPT'?'Saxlanmış məlumat oxunmur. Dəyişikliklər dayandırıldı.':'Server xətası. Yenidən cəhd edin.',500,{requestId});
+    }
   },
   async scheduled(event, e, ctx) {
+    await ensureOperations(e);
     ctx.waitUntil((async () => {
       await scanAllAiWatches(e);
       try {

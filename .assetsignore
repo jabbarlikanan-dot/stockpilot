@@ -9,3 +9,11 @@ reset-pin.mjs
 node_modules/**
 *.zip
 *.md
+
+*.sql
+*.mjs
+*.json
+*.jsonc
+tests/**
+scripts/**
+node_modules/**

@@ -9,6 +9,8 @@ let deliveryMap = null;
 let deliveryMarker = null;
 let deliveryQuote = null;
 let quoteTimer = null;
+let quoteGeneration=0;
+let checkoutBusy=false;
 const $ = (id) => document.getElementById(id);
 const money = (n) => `${(Number(n) || 0).toLocaleString("az-AZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} ₼`;
 const esc = (s) => String(s || "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[m]);
@@ -21,15 +23,8 @@ function showToast(text) {
   clearTimeout(showToast.timer);
   showToast.timer = setTimeout(() => toast.classList.remove("show"), 2300);
 }
-function localDate() {
-  const now = new Date();
-  return new Date(now - now.getTimezoneOffset() * 60000).toISOString().slice(0, 10);
-}
-function localTime() {
-  const now = new Date();
-  now.setMinutes(Math.ceil((now.getMinutes() + 30) / 30) * 30, 0, 0);
-  return `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-}
+function localDate() { return StockDomain.bakuDate(); }
+function defaultSchedule() { const ms=Math.ceil((Date.now()+30*60000)/(30*60000))*(30*60000);return new Date(ms+4*3600000).toISOString().slice(0,16); }
 function buildTimeOptions() {
   const options = [];
   for (let hour = 0; hour <= 23; hour += 1) {
@@ -44,8 +39,8 @@ function setupSchedule() {
   buildTimeOptions();
   const today = localDate();
   $("preferredDate").min = today;
-  $("preferredDate").value = today;
-  const defaultTime = localTime();
+  $("preferredDate").value = defaultSchedule().slice(0,10);
+  const defaultTime = defaultSchedule().slice(11,16);
   $("preferredTime").value = Array.from($("preferredTime").options).some((option) => option.value === defaultTime) ? defaultTime : "10:00";
 }
 function filteredProducts() {
@@ -82,6 +77,7 @@ function render() {
       const product = products.find((item) => item.id === button.dataset.add);
       if (!product) return showToast("Məhsul tapılmadı.");
       const line = cart.find((item) => item.id === product.id);
+      if(line?.quantity>=999)return showToast("Bir məhsuldan maksimum 999 ədəd sifariş edilə bilər.");
       if (line) line.quantity += 1;
       else cart.push({ ...product, quantity: 1 });
       renderCart();
@@ -116,6 +112,7 @@ function renderCart() {
   document.querySelectorAll("[data-plus]").forEach((button) => button.onclick = () => {
     const item = cart.find((line) => line.id === button.dataset.plus);
     if (!item) return;
+    if(item.quantity>=999)return showToast("Maksimum say 999-dur.");
     item.quantity += 1;
     renderCart();
   });
@@ -154,9 +151,10 @@ function setDeliveryPoint(lat, lng, requestQuote = true) {
   if (requestQuote) queueQuote();
 }
 async function updateQuote() {
+  const generation=++quoteGeneration;
   if (document.querySelector('input[name="delivery"]:checked')?.value !== "address") return;
   const lat = Number($("deliveryLat").value), lng = Number($("deliveryLng").value);
-  if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+  if (!$("deliveryLat").value || !$("deliveryLng").value || !Number.isFinite(lat) || !Number.isFinite(lng)) {
     deliveryQuote = null;
     $("deliveryDistance").textContent = "Konum seçilməyib";
     $("deliveryQuote").textContent = "—";
@@ -172,11 +170,13 @@ async function updateQuote() {
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || "Çatdırılma hesablanmadı.");
+    if(generation!==quoteGeneration)return;
     deliveryQuote = data;
     $("deliveryDistance").textContent = `${Number(data.distanceKm).toFixed(1)} km · ${data.periodLabel || "standart tarif"}`;
     $("deliveryQuote").textContent = money(data.fee);
     renderCart();
   } catch (error) {
+    if(generation!==quoteGeneration)return;
     deliveryQuote = null;
     $("deliveryDistance").textContent = error.message || "Hesablamaq alınmadı";
     $("deliveryQuote").textContent = "—";
@@ -184,10 +184,12 @@ async function updateQuote() {
   }
 }
 function queueQuote() {
+  quoteGeneration++;deliveryQuote=null;renderCart();
   clearTimeout(quoteTimer);
   quoteTimer = setTimeout(updateQuote, 250);
 }
 function syncDeliveryFields() {
+  quoteGeneration++;clearTimeout(quoteTimer);
   const address = document.querySelector('input[name="delivery"]:checked')?.value === "address";
   $("metroField").classList.toggle("hidden", address);
   $("addressDeliveryPanel").classList.toggle("hidden", !address);
@@ -239,6 +241,7 @@ syncDeliveryFields();
 
 $("checkout").onsubmit = async (event) => {
   event.preventDefault();
+  if(checkoutBusy)return;
   const message = $("message"); message.textContent = "";
   if (!cart.length) { message.textContent = "Səbət boşdur."; return; }
   const form = new FormData(event.currentTarget);
@@ -248,16 +251,22 @@ $("checkout").onsubmit = async (event) => {
   if (form.get("delivery") === "address" && (!form.get("deliveryLat") || !form.get("deliveryLng"))) { message.textContent = "Çatdırılma konumunu xəritədən seçin."; return; }
   const body = Object.fromEntries(form);
   body.preferredAt = `${date}T${time}:00`;
+  const scheduleError=StockDomain.scheduleError(body.preferredAt);if(scheduleError){message.textContent=scheduleError;return;}
+  if(body.delivery==="address"&&!deliveryQuote){message.textContent="Əvvəl çatdırılma qiymətinin hesablanmasını gözləyin.";return;}
   body.cart = cart.map(({ id, quantity }) => ({ id, quantity }));
   const submit = event.currentTarget.querySelector('button[type="submit"]');
-  submit.disabled = true; submit.textContent = "Göndərilir…";
+  const encoded=JSON.stringify(body),storageKey=`checkout:${shop}`;
+  let attempt;try{attempt=JSON.parse(sessionStorage.getItem(storageKey)||'null');}catch{}
+  if(!attempt||attempt.body!==encoded)attempt={key:crypto.randomUUID(),body:encoded};
+  sessionStorage.setItem(storageKey,JSON.stringify(attempt));
+  checkoutBusy=true;submit.disabled = true; submit.textContent = "Göndərilir…";
   try {
-    const response = await fetch(`/api/store/${encodeURIComponent(shop)}/orders`, { method:"POST", headers:{"content-type":"application/json"}, body:JSON.stringify(body) });
+    const response = await fetch(`/api/store/${encodeURIComponent(shop)}/orders`, { method:"POST", headers:{"content-type":"application/json","idempotency-key":attempt.key}, body:encoded });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || "Sifariş göndərilmədi.");
     location.assign(`order-success.html?shop=${encodeURIComponent(shop)}&id=${encodeURIComponent(data.orderId || "")}`);
   } catch (error) { message.textContent = error.message || "Xəta oldu. Yenidən cəhd edin."; }
-  finally { submit.disabled = false; submit.textContent = "Sifarişi göndər"; }
+  finally { checkoutBusy=false;submit.disabled = false; submit.textContent = "Sifarişi göndər"; }
 };
 
 boot();

@@ -52,7 +52,7 @@ async function loadXlsx() {
       script.src = "https://cdn.sheetjs.com/xlsx-0.20.2/package/dist/xlsx.full.min.js";
       script.async = true;
       script.onload = () => window.XLSX ? resolve(window.XLSX) : reject(new Error("Excel modulu yüklənmədi."));
-      script.onerror = () => reject(new Error("Excel modulu yüklənmədi."));
+      script.onerror = () => {xlsxLoader=null;script.remove();reject(new Error("Excel modulu yüklənmədi."));};
       document.head.appendChild(script);
     });
   }
@@ -82,19 +82,14 @@ const esc = (s) =>
   );
 const safeImg = (value) => { const src=String(value||'').trim(); return /^data:image\/(?:jpeg|png|webp);base64,[a-z0-9+/=]+$/i.test(src) || /^\/api\/images\/[A-Za-z0-9_./%-]+$/.test(src) && !src.includes('..') ? src : ''; };
 let saveTimer = null;
-const save = (now = false) => {
-  state.ui.lastSavedAt = new Date().toISOString();
+const save = (now=false) => {
+  window.StockState.markDirty(state);
   clearTimeout(saveTimer);
-  const persist = () => window.persistStockState(state);
-  if (now) return persist();
-  saveTimer = setTimeout(persist, 280);
+  const persist=async()=>{saveTimer=null;const ok=await window.persistStockState(state);if(ok)state.ui.lastSavedAt=new Date().toISOString();return ok;};
+  if(now)return persist();
+  saveTimer=setTimeout(persist,280);
 };
-window.addEventListener("pagehide", () => {
-  if (!saveTimer) return;
-  clearTimeout(saveTimer);
-  saveTimer = null;
-  window.persistStockState(state);
-});
+window.flushStock=async()=>{if(saveTimer){clearTimeout(saveTimer);saveTimer=null;await save(true);}await window.StockState.flush();};
 const active = () => state.orders.find((o) => o.id === state.active);
 const country = (k) => state.countries[k] || state.countries.america;
 const shipping = (g, k) => {
@@ -206,21 +201,22 @@ function soldEvents(i) {
   return i.soldAt && soldQty(i) ? [{ qty: soldQty(i), soldAt: i.soldAt }] : [];
 }
 function soldSummary(i, qty = soldQty(i)) {
-  const acquired = acquiredQty(i);
-  const x = calc(i);
-  const count = Math.min(acquired, Math.max(0, Number(qty) || 0));
-  const purchase = acquired ? x.purchase * (count / acquired) : 0;
-  const sales = (Number(i.sale) || 0) * count;
-  return { purchase, sales, profit: sales - purchase, pct: sales ? (sales - purchase) / sales : 0 };
+  const count=Math.min(acquiredQty(i),Math.max(0,Number(qty)||0));
+  let left=count,sales=0,purchase=0;
+  for(const event of soldEvents(i)) {const n=Math.min(left,Number(event.qty)||0);if(n<=0)continue;const ratio=n/Number(event.qty);sales+=Number.isFinite(event.sales)?event.sales*ratio:(Number(i.sale)||0)*n;purchase+=Number.isFinite(event.purchase)?event.purchase*ratio:StockDomain.unitCost(i,state)*n;left-=n;}
+  if(left>0){sales+=(Number(i.sale)||0)*left;purchase+=StockDomain.unitCost(i,state)*left;}
+  return {sales,purchase,profit:sales-purchase,pct:sales?(sales-purchase)/sales:0};
 }
 function addSale(i, qty) {
   const count = Math.min(remainingQty(i), Math.max(0, Number(qty) || 0));
   if (!count) return false;
   const now = new Date().toISOString();
+  const previousEvents=soldEvents(i);
+  const unitCost=StockDomain.unitCost(i,state);
   i.acquiredQty = acquiredQty(i);
   i.qty = remainingQty(i) - count;
   i.soldQty = soldQty(i) + count;
-  i.saleEvents = [...soldEvents(i), { qty: count, soldAt: now }];
+  i.saleEvents = [...previousEvents, { qty: count, soldAt: now, sales:StockDomain.round(count*(Number(i.sale)||0)), purchase:StockDomain.round(count*unitCost) }];
   i.sold = i.qty === 0;
   i.soldAt = i.sold ? now : null;
   return true;
@@ -271,6 +267,8 @@ function allTotals() {
   );
 }
 async function refreshCustomerOrders() {
+  await window.flushStock();
+  if(window.StockState.isDirty())throw new Error("Saxlanmamış dəyişikliklər var.");
   const response = await fetch("/api/customer-orders", {
     credentials: "same-origin",
   });
@@ -280,11 +278,13 @@ async function refreshCustomerOrders() {
     credentials: "same-origin",
   });
   if (stateResponse.ok) {
-    const fresh = (await stateResponse.json()).state || {};
+    const snapshot=await stateResponse.json();
+    window.StockState.loaded(snapshot.version);
+    const fresh = snapshot.state || {};
     state.orders = Array.isArray(fresh.orders) ? fresh.orders : state.orders;
     state.customerSales = Array.isArray(fresh.customerSales) ? fresh.customerSales : state.customerSales;
     state.countries = { ...state.countries, ...(fresh.countries || {}) };
-  }
+  } else throw new Error("Stok yenilənmədi.");
 }
 function customerHistory() {
   const history = [...state.customerOrders].sort(
@@ -305,6 +305,7 @@ function editCustomerOrder(id) {
     `<div class="grid"><div class="field"><label>Ad soyad</label><input id="customerName" value="${esc(customer.name)}"></div><div class="field"><label>Telefon</label><input id="customerPhone" value="${esc(customer.phone)}"></div><div class="field wide"><label>Qeyd</label><input id="customerNote" value="${esc(customer.note || "")}"></div><div class="field"><label>Çatdırılma</label><select id="customerDelivery"><option value="metro" ${customer.delivery === "metro" ? "selected" : ""}>Metro təhvil</option><option value="address" ${customer.delivery === "address" ? "selected" : ""}>Ünvana çatdırılma</option></select></div><div class="field"><label>İstədiyi tarix/saat</label><input id="customerPreferredAt" type="datetime-local" value="${esc(customer.preferredAt || "")}"></div><div class="field"><label>Metro / rayon</label><input id="customerMetro" value="${esc(customer.metro || "")}"></div><div class="field wide"><label>Ünvan</label><input id="customerAddress" value="${esc(customer.address || "")}"></div><div class="field wide"><label>Ödəniş</label><select id="customerPayment"><option value="cash" ${customer.payment === "cash" ? "selected" : ""}>Nağd ödəniş</option><option value="card" ${customer.payment === "card" ? "selected" : ""}>Kartla ödəniş</option></select></div></div><button id="saveCustomerEdit" class="primary" style="margin-top:14px">Dəyişiklikləri yadda saxla</button>`,
   );
   $("saveCustomerEdit").onclick = async () => {
+    await window.flushStock();if(window.StockState.isDirty())return notify("Əvvəl dəyişiklikləri saxlayın.","error");
     const response = await fetch(`/api/customer-orders/${id}`, {
       method: "PUT",
       credentials: "same-origin", headers: { "content-type": "application/json" },
@@ -315,9 +316,17 @@ function editCustomerOrder(id) {
     hideModal();
     render();
   };
+  guardCustomerActions();
+}
+function guardCustomerActions(){
+  document.querySelectorAll('[data-customer-status],[data-customer-next],[data-customer-delete],#saveCustomerEdit').forEach(el=>{
+    const key=el.tagName==='SELECT'?'onchange':'onclick',fn=el[key];if(!fn||fn.guarded)return;
+    const guarded=async event=>{el.disabled=true;try{await fn(event);}catch(error){notify(error.message||'Əməliyyat alınmadı. Yenidən cəhd edin.','error');}finally{el.disabled=false;}};guarded.guarded=true;el[key]=guarded;
+  });
 }
 function bindCustomerOrderActions() {
   document.querySelectorAll("[data-customer-status]").forEach((select) => (select.onchange = async () => {
+    await window.flushStock();if(window.StockState.isDirty())return notify("Əvvəl dəyişiklikləri saxlayın.","error");
     const response = await fetch(`/api/customer-orders/${select.dataset.customerStatus}`, { method: "PUT", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ status: select.value }) });
     if (!response.ok) return notify("Status yadda saxlanmadı.");
     const result = await response.json().catch(() => ({}));
@@ -329,6 +338,7 @@ function bindCustomerOrderActions() {
   document.querySelectorAll("[data-customer-next]").forEach((button) => (button.onclick = async () => {
     const id = button.dataset.customerNext;
     const status = button.dataset.nextStatus;
+    await window.flushStock();if(window.StockState.isDirty())return notify("Əvvəl dəyişiklikləri saxlayın.","error");
     const response = await fetch(`/api/customer-orders/${id}`, { method: "PUT", credentials: "same-origin", headers: { "content-type": "application/json" }, body: JSON.stringify({ status }) });
     if (!response.ok) return notify("Status yadda saxlanmadı.", "error");
     await refreshCustomerOrders();
@@ -337,16 +347,19 @@ function bindCustomerOrderActions() {
   document.querySelectorAll("[data-customer-edit]").forEach((button) => (button.onclick = () => editCustomerOrder(button.dataset.customerEdit)));
   document.querySelectorAll("[data-customer-delete]").forEach((button) => (button.onclick = async () => {
     if (!confirm("Müştəri sifarişi silinsin?")) return;
+    await window.flushStock();if(window.StockState.isDirty())return notify("Əvvəl dəyişiklikləri saxlayın.","error");
     const response = await fetch(`/api/customer-orders/${button.dataset.customerDelete}`, { method: "DELETE", credentials: "same-origin" });
     if (!response.ok) return notify("Sifariş silinmədi.");
     await refreshCustomerOrders();
     hideModal();
     render();
   }));
+  guardCustomerActions();
 }
 function newOrder() {
+  editing=null;pendingImage="";
   const o = {
-    id: Date.now().toString(),
+    id: crypto.randomUUID(),
     name: `Sifariş ${state.orders.length + 1}`,
     budget: 0,
     note: "",
@@ -360,6 +373,7 @@ function newOrder() {
   render();
 }
 function duplicateOrder() {
+  editing=null;pendingImage="";
   const source = active();
   if (!source) return newOrder();
   const copy = {
@@ -370,7 +384,7 @@ function duplicateOrder() {
     archived: false,
     // Yeni cədvəl satış tarixçəsini yox, yalnız məhsulları kopyalayır.
     items: (source.items || []).map((item) => {
-      const result = { ...item };
+      const result = { ...item, id:crypto.randomUUID() };
       const count = acquiredQty(item);
       result.qty = count;
       result.acquiredQty = count;
@@ -410,6 +424,7 @@ function compactImage(file) {
         c.getContext("2d").drawImage(im, 0, 0, c.width, c.height);
         ok(c.toDataURL("image/png"));
       };
+      im.onerror=()=>no(new Error("Şəkil oxunmadı."));
       im.src = r.result;
     };
     r.onerror = no;
@@ -427,6 +442,7 @@ function tabs() {
   document.querySelectorAll(".tab").forEach(
     (b) =>
       (b.onclick = () => {
+        editing=null;pendingImage="";
         state.active = b.dataset.id;
         editing = null;
         save();
@@ -582,7 +598,7 @@ function render() {
   }
   const e = Number.isInteger(editing) ? o.items[editing] : null;
   if (!e) editing = null;
-  if (e) pendingImage = e.img || "";
+
   const t = totals(o),
     remain = (+o.budget || 0) - t.purchase + t.sales,
     spent = Math.max(0, t.purchase - t.sales),
@@ -670,7 +686,7 @@ function bind(o, e) {
     ($("qty").value = Math.max(1, (+$("qty").value || 1) - 1));
   $("qtyPlus").onclick = () => ($("qty").value = (+$("qty").value || 0) + 1);
   $("image").onchange = async (v) => {
-    if (v.target.files[0]) pendingImage = await compactImage(v.target.files[0]);
+    if (v.target.files[0]) {try{pendingImage=await compactImage(v.target.files[0]);}catch{notify("Şəkil oxunmadı.","error");}}
   };
   if ($("deleteImage"))
     $("deleteImage").onclick = () => {
@@ -706,10 +722,11 @@ function bind(o, e) {
       favorite: e?.favorite || false,
       soldQty: e ? soldQty(e) : 0,
       saleEvents: e ? soldEvents(e) : [],
-      sold: e ? Boolean(e.sold) : false,
+      sold: requestedQty===0,
       soldAt: e?.soldAt || null,
     };
-    if (!i.name || !i.qty) return notify("Məhsulun adını və sayını yazın.");
+    if (!i.name || !Number.isInteger(i.qty) || i.qty<0 || (!e&&i.qty===0) || [i.price,i.sale,i.weight,i.minStock].some(v=>!Number.isFinite(v)||v<0)) return notify("Ad, tam məhsul sayı və mənfi olmayan qiymətlər yazın.");
+    i.sold=i.qty===0;
     if (e) o.items[editing] = i;
     else o.items.push(i);
     editing = null;
@@ -721,6 +738,7 @@ function bind(o, e) {
     (b) =>
       (b.onclick = () => {
         editing = +b.dataset.edit;
+        pendingImage=o.items[editing].img||"";
         render();
       }),
   );
@@ -754,7 +772,7 @@ function bind(o, e) {
         const count = window.StockPilotUI?.promptNumber
           ? await window.StockPilotUI.promptNumber({ title: "Satış əlavə et", label: `Stokda ${max} ədəd var. Neçə ədəd satıldı?`, min: 1, max, value: 1, confirmText: "Satışı əlavə et" })
           : Number(prompt(`Neçə ədəd satıldı? Stokda ${max} ədəd var.`, "1"));
-        if (count == null || !Number.isFinite(Number(count)) || Number(count) <= 0) return;
+        if (count == null || !Number.isFinite(Number(count)) || Number(count) <= 0 || !Number.isInteger(Number(count))) return;
         if (Number(count) > max) return notify(`Stokda yalnız ${max} ədəd qalıb.`, "error");
         addSale(i, Number(count));
         save();
@@ -800,7 +818,8 @@ function tariffSettings() {
     "Tarif və məzənnə ayarları",
     `<p class="hint">Hər ölkənin karqo planını ayrıca dəyişin. 1 kq-dan ağır məhsulda son qiymət hər başlanmış kq üçün tətbiq olunur və AZN məbləği avtomatik hesablanır.</p>${rows}<button id="saveTariffs" class="primary" style="margin-top:12px">Tarifləri yadda saxla</button>`,
   );
-  $("saveTariffs").onclick = () => {
+  $("saveTariffs").onclick = async () => {
+    if([...document.querySelectorAll("[data-rate]")].some(x=>!Number.isFinite(+x.value)||+x.value<=0)||[...document.querySelectorAll("[data-tariff]")].some(x=>!Number.isFinite(+x.value)||+x.value<0))return notify("Məzənnə sıfırdan böyük, tariflər mənfi olmayan ədəd olmalıdır.","error");
     document
       .querySelectorAll("[data-tariff]")
       .forEach(
@@ -817,13 +836,14 @@ function tariffSettings() {
     document.querySelectorAll("[data-currency]").forEach((x) => {
       state.countries[x.dataset.currency].currency = x.value.trim() || "₼";
     });
-    save(true);
+    if(!await save(true))return;
     hideModal();
     render();
   };
 }
 async function exportExcel() {
   try { await loadXlsx(); } catch { return notify("Excel modulu yüklənmədi. İnterneti yoxlayın."); }
+  if(!state.orders.length)return notify("İxrac üçün sifariş yoxdur.");
   const wb = XLSX.utils.book_new();
   state.orders.forEach((o, n) => {
     const rows = [
@@ -877,7 +897,7 @@ async function exportExcel() {
     XLSX.utils.book_append_sheet(
       wb,
       ws,
-      (o.name || `Sifariş ${n + 1}`).slice(0, 31),
+      `${String(n+1)} ${o.name || "Sifariş"}`.replace(/[\\/?*\[\]:]/g,"-").slice(0,31),
     );
   });
   XLSX.writeFile(wb, "stockpilot-hesabat.xlsx");
@@ -968,12 +988,14 @@ async function importItems(file) {
             soldAt: sold ? new Date().toISOString() : null,
           };
         })
-        .filter((item) => item.name && item.qty > 0);
+        .filter((item) => item.name && Number.isInteger(item.qty) && item.qty > 0 && [item.price,item.sale,item.weight].every(v=>Number.isFinite(v)&&v>=0));
       if (!items.length) {
         return notify(
           "Oxunan məhsul tapılmadı. Başlıqlar: Məhsul, Say, Alış qiyməti, Satış qiyməti, Çəki, Ölkə, Kateqoriya, Status.",
         );
       }
+      if(!o)return notify("Əvvəl aktiv sifariş seçin.");
+      if(o.items.length+items.length>5000)return notify("Bir sifarişdə maksimum 5000 məhsul ola bilər.");
       o.items.push(...items);
       save();
       render();
@@ -1051,6 +1073,7 @@ window.startStockPilot = () => {
   $("storeBtn").onclick = () => window.open(`store.html?shop=${encodeURIComponent(window.currentUser?.username || '')}`, '_blank');
   if ($("quoteBtn")) $("quoteBtn").onclick = () => {
     const o = active();
+    if(!o)return notify("Əvvəl sifariş yaradın.");
     const w = window.open("", "_blank");
     if (!w) return notify("Brauzer popup pəncərəsini blokladı. Popup icazəsini aktiv edin.", "error");
     const itemText = o.items

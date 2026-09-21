@@ -1,0 +1,12 @@
+{
+  "name": "stockpilot",
+  "version": "44.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/regression.mjs tests/frontend.mjs",
+    "test:browser": "node tests/browser-smoke.mjs",
+    "deploy": "npx wrangler deploy"
+  },
+  "engines": { "node": ">=22.13.0" }
+}

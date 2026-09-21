@@ -1,5 +1,6 @@
 const request = (path, options = {}) => fetch(path, { ...options, credentials: "same-origin", headers: { ...(options.headers || {}) } });
 let me;
+let reportState={};
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[m]));
 async function logout() {
   localStorage.removeItem("stockpilotToken");
@@ -31,16 +32,16 @@ function paintUser() {
     );
 }
 function soldValue(item) {
-  if (item.customerSale) return Number(item.sales) || 0;
+  if (item.customerSale || Number.isFinite(item.sales)) return Number(item.sales) || 0;
   return (+item.sale || 0) * (+item.qty || 0);
 }
 function profitValue(item) {
-  if (item.customerSale)
+  if (item.customerSale || Number.isFinite(item.purchase))
     return (Number(item.sales) || 0) - (Number(item.purchase) || 0);
-  const rate = item.country === "spain" ? 1.96 : 1.7;
-  return soldValue(item) - (+item.price || 0) * (+item.qty || 0) * rate;
+  return soldValue(item) - StockDomain.unitCost(item,reportState) * (+item.qty || 0);
 }
 function drawStats(state) {
+  reportState=state;
   const now = new Date(),
     weekStart = startOfWeek(now),
     items = (state.orders || [])
@@ -48,7 +49,7 @@ function drawStats(state) {
         const acquired = Math.max(0, Number(item.acquiredQty ?? item.qty) || 0);
         const soldQty = Math.min(acquired, Math.max(0, Number.isFinite(Number(item.soldQty)) ? Number(item.soldQty) : item.sold ? acquired : 0));
         const events = Array.isArray(item.saleEvents) ? item.saleEvents : item.soldAt && soldQty ? [{ qty: soldQty, soldAt: item.soldAt }] : [];
-        return events.map((event) => ({ ...item, qty: Number(event.qty) || 0, soldAt: event.soldAt, sold: true }));
+        return events.map((event) => ({ ...item, acquiredQty:acquired, ...event, qty: Number(event.qty) || 0, soldAt: event.soldAt, sold: true }));
       }))
       .concat(
         (state.customerSales || []).map((sale) => ({
@@ -77,7 +78,7 @@ function drawStats(state) {
   const names = ["B.e", "Ç.a", "Ç.", "C.a", "C.", "Ş.", "B."];
   const bars = names.map((day, index) => ({
     day,
-    value: sum(inPeriod((date) => (date.getDay() + 6) % 7 === index)),
+    value: sum(week.filter(item=>(new Date(item.soldAt).getDay()+6)%7===index)),
   }));
   const largest = Math.max(1, ...bars.map((bar) => bar.value));
   const chart = document.getElementById("chart");
@@ -107,12 +108,14 @@ async function boot() {
   let state;
   try {
     const user = await request("/api/me");
-    if (!user.ok) return logout();
+    if(user.status===401){location.href="index.html";return;}
+    if(!user.ok)throw new Error("Profil yüklənmədi.");
     me = (await user.json()).user;
     const saved = await request("/api/state");
-    state = saved.ok ? (await saved.json()).state : { orders: [] };
-  } catch {
-    return logout();
+    if(!saved.ok)throw new Error("Hesabat yüklənmədi. Səhifəni yeniləyin.");
+    state=(await saved.json()).state;
+  } catch(error) {
+    document.getElementById("stats").textContent=error.message;return;
   }
   paintUser();
   document

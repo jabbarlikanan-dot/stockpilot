@@ -22,7 +22,8 @@ function paint(user) {
 
 async function boot() {
   const res = await api("/api/me");
-  if (!res.ok) return logout();
+  if(res.status===401){location.href="index.html";return;}
+  if(!res.ok)throw new Error("Profil yüklənmədi.");
   let user = (await res.json()).user;
   paint(user);
   const form = document.getElementById("profileForm");
@@ -34,6 +35,8 @@ async function boot() {
     const body = Object.fromEntries(new FormData(form));
     const msg = document.getElementById("message");
     if (body.newPassword && !/^\d{4}$/.test(body.newPassword)) return (msg.textContent = "Yeni şifrə 4 rəqəmli olmalıdır.");
+    const submit=form.querySelector('button[type="submit"]');if(submit)submit.disabled=true;
+    try {
     const update = await api("/api/profile", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(body) });
     const data = await update.json().catch(() => ({}));
     if (!update.ok) { msg.className = "msg"; return (msg.textContent = data.error || "Dəyişiklik yadda saxlanmadı."); }
@@ -42,10 +45,11 @@ async function boot() {
     paint(user);
     form.currentPassword.value = ""; form.newPassword.value = "";
     msg.className = "success"; msg.textContent = "Profil uğurla yeniləndi.";
+    }catch{msg.textContent="Saxlanmadı. İnterneti yoxlayıb yenidən cəhd edin.";}finally{if(submit)submit.disabled=false;}
   };
   document.getElementById("logout").onclick = logout;
 }
-boot().catch(logout);
+boot().catch(error=>{document.getElementById("message").textContent=error.message||"Profil yüklənmədi.";});
 
 async function setupStoreSettings() {
   const form = document.getElementById("storeSettingsForm");
@@ -53,6 +57,7 @@ async function setupStoreSettings() {
   const message = document.getElementById("storeSettingsMessage");
   const response = await api("/api/store-settings");
   const data = await response.json().catch(() => ({}));
+  if(!response.ok){message.textContent="Ayarlar yüklənmədi. Səhifəni yeniləyin.";return;}
   if (response.ok && data.settings) {
     for (const [key, value] of Object.entries(data.settings)) if (form.elements[key]) form.elements[key].value = value;
   }
@@ -69,9 +74,11 @@ async function setupStoreSettings() {
     event.preventDefault();
     message.textContent = "Saxlanılır…";
     const body = Object.fromEntries(new FormData(form));
+    try {
     const save = await api("/api/store-settings", { method:"PUT", headers:{"content-type":"application/json"}, body:JSON.stringify(body) });
     const saved = await save.json().catch(() => ({}));
     message.textContent = save.ok ? "Çatdırılma ayarları saxlanıldı." : (saved.error || "Ayarlar saxlanılmadı.");
+    }catch{message.textContent="Saxlanmadı. İnterneti yoxlayın.";}
   };
 }
 setupStoreSettings().catch(() => {});

@@ -1,13 +1,14 @@
 (() => {
   const request = (path, options = {}) => fetch(path, { ...options, credentials: "same-origin", headers: { ...(options.headers || {}) } });
   const esc = (value) => String(value || "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[m]));
-  const formatDate = (value) => new Intl.DateTimeFormat("az-AZ", { dateStyle: "medium", timeStyle: "short", hour12: false }).format(new Date(value));
+  const formatDate = (value) => new Intl.DateTimeFormat("az-AZ", { dateStyle: "medium", timeStyle: "short", hour12: false }).format(new Date(typeof value==='string'&&/^\d{4}-\d{2}-\d{2} \d{2}:/.test(value)?value.replace(' ','T')+'Z':value));
   const sender = (item) => item.data?.from ? `Göndərən: ${item.data.from}` : item.kind === "customer-order" ? "Mənbə: Mağaza sifarişi" : item.kind === "order-status" ? "Mənbə: Sifariş sistemi" : item.kind === "ai-price" ? "Mənbə: AI Alış Köməkçisi" : "Mənbə: StockPilot";
   const targetFor = (item) => item.kind === "customer-order" && item.data?.orderId ? `customer-orders.html#order-${encodeURIComponent(item.data.orderId)}` : item.kind === "ai-price" ? `ai-purchases.html#product-${encodeURIComponent(item.data?.productId || "")}` : `notifications.html#note-${encodeURIComponent(item.id)}`;
   let list = [];
 
   async function markOne(id) {
-    await request(`/api/notifications/${encodeURIComponent(id)}/read`, { method: "POST" });
+    const response=await request(`/api/notifications/${encodeURIComponent(id)}/read`, { method: "POST" });
+    if(!response.ok)throw new Error("Bildiriş oxunmuş kimi saxlanmadı.");
     const item = list.find((note) => note.id === id);
     if (item) item.read = true;
   }
@@ -35,12 +36,12 @@
       if (!item) return;
       const open = (event) => {
         if (event.target.closest("a,button,input,textarea,select")) return;
-        markOne(item.id).finally(() => { location.href = targetFor(item); });
+        markOne(item.id).catch(()=>{}).finally(() => { location.href = targetFor(item); });
       };
       element.onclick = open;
       element.onkeydown = (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); open(event); } };
       element.querySelectorAll(".notification-open").forEach((link) => {
-        link.onclick = (event) => { event.preventDefault(); markOne(item.id).finally(() => { location.href = targetFor(item); }); };
+        link.onclick = (event) => { event.preventDefault(); markOne(item.id).catch(()=>{}).finally(() => { location.href = targetFor(item); }); };
       });
     });
   }
@@ -48,9 +49,11 @@
   function renderPage() {
     const page = document.getElementById("notificationsPage");
     if (!page) return;
+    const draft=Object.fromEntries(["notifyUsername","notifyTitle","notifyMessage"].map(id=>[id,document.getElementById(id)?.value]));
     page.innerHTML = `<section class="notification-page-head"><div><p class="eyebrow">Şəxsi hesab</p><h1>Bildirişlər</h1><p>Kimdən gəldiyini, mətnini və göndərilmə vaxtını burada izləyin.</p></div><button id="pageReadAll" class="secondary">Hamısını oxundu et</button></section><section class="notification-list notification-page-list">${list.map((item) => card(item)).join("") || '<p class="notification-empty">Hələ bildiriş yoxdur.</p>'}</section><section class="notification-compose box"><h2>İstifadəçiyə bildiriş göndər</h2><p>Username ilə başqa StockPilot istifadəçisinə mesaj göndərin.</p><div class="grid"><div class="field"><label>Username</label><input id="notifyUsername" placeholder="istifadəçi adı"></div><div class="field wide"><label>Başlıq</label><input id="notifyTitle" value="StockPilot bildirişi"></div><div class="field wide"><label>Mesaj</label><textarea id="notifyMessage" placeholder="Mesajınızı yazın"></textarea></div></div><div class="notification-compose-actions"><span id="notifyResult" role="status"></span><button id="sendNotification" class="primary">Bildiriş göndər</button></div></section>`;
-    document.getElementById("pageReadAll").onclick = markAll;
-    document.getElementById("sendNotification").onclick = sendNotification;
+    for(const [id,value] of Object.entries(draft))if(value!==undefined)document.getElementById(id).value=value;
+    document.getElementById("pageReadAll").onclick = ()=>markAll().catch(()=>window.StockPilotUI?.toast("Əməliyyat alınmadı.","error"));
+    document.getElementById("sendNotification").onclick = async()=>{const b=document.getElementById("sendNotification");b.disabled=true;try{await sendNotification();}catch{document.getElementById("notifyResult").textContent="Göndərilmədi. İnterneti yoxlayın.";}finally{b.disabled=false;}};
     bindItems(page);
   }
 
@@ -70,7 +73,7 @@
     renderPage();
   }
 
-  async function markAll() { await request("/api/notifications/read-all", { method: "POST" }); list.forEach((item) => { item.read = true; }); await load(); }
+  async function markAll() { const response=await request("/api/notifications/read-all", { method: "POST" });if(!response.ok)throw new Error("Saxlanmadı."); list.forEach((item) => { item.read = true; }); await load(); }
   async function sendNotification() {
     const username = document.getElementById("notifyUsername").value.trim();
     const title = document.getElementById("notifyTitle").value.trim();
@@ -90,13 +93,13 @@
     const popover = document.getElementById("notificationPopover");
     if (button && popover) {
       button.onclick = () => { popover.classList.toggle("hidden"); button.setAttribute("aria-expanded", String(!popover.classList.contains("hidden"))); };
-      document.getElementById("readAllNotifications")?.addEventListener("click", markAll);
+      document.getElementById("readAllNotifications")?.addEventListener("click", ()=>markAll().catch(()=>{}));
       document.getElementById("allNotifications")?.addEventListener("click", (event) => { event.preventDefault(); location.href = "notifications.html"; });
       document.addEventListener("click", (event) => { if (!event.target.closest(".notification-menu")) popover.classList.add("hidden"); });
     }
-    const later = () => { if ("requestIdleCallback" in window) requestIdleCallback(load, { timeout: 1200 }); else setTimeout(load, 350); };
+    const later = () => { if ("requestIdleCallback" in window) requestIdleCallback(()=>load().catch(()=>{}), { timeout: 1200 }); else setTimeout(()=>load().catch(()=>{}), 350); };
     later();
-    setInterval(load, 90000);
+    setInterval(()=>load().catch(()=>{}), 90000);
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", boot, { once: true });

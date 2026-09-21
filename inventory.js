@@ -4,6 +4,8 @@ const safeImg = (value) => { const src=String(value||"").trim(); return /^data:i
 const esc = (value) => String(value ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" }[m]));
 let state = { orders: [] };
 let user;
+let confirmedState;
+let saving=false;
 let healthFilter = "all";
 const logout = async () => { localStorage.removeItem("stockpilotToken"); try { await fetch("/api/logout", { method:"POST", credentials:"same-origin" }); } catch {} location.href = "index.html"; };
 const toast = (message, type = "info") => window.StockPilotUI?.toast(message, type);
@@ -28,21 +30,21 @@ function addSale(item, quantity) {
   const count = Math.min(remaining(item), Math.max(0, Number(quantity) || 0));
   if (!count) return false;
   const now = new Date().toISOString();
+  const priorSold=sold(item),priorEvents=Array.isArray(item.saleEvents)?item.saleEvents:item.soldAt?[{qty:priorSold,soldAt:item.soldAt}]:[];
+  const unitCost=StockDomain.unitCost(item,state);
   item.acquiredQty = acquired(item);
   item.qty = remaining(item) - count;
   item.soldQty = sold(item) + count;
-  item.saleEvents = [...(Array.isArray(item.saleEvents) ? item.saleEvents : item.soldAt ? [{ qty: sold(item), soldAt: item.soldAt }] : []), { qty: count, soldAt: now }];
+  item.saleEvents = [...priorEvents,{qty:count,soldAt:now,sales:StockDomain.round(count*(Number(item.sale)||0)),purchase:StockDomain.round(count*unitCost)}];
   item.sold = item.qty === 0;
   item.soldAt = item.sold ? now : null;
   return true;
 }
-async function save() {
-  const response = await api("/api/state", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ state }) });
-  if (!response.ok) throw new Error("Dəyişiklik serverdə yadda saxlanmadı.");
-}
-async function persistAndRender(successMessage = "Stok yeniləndi") {
-  try { await save(); render(); toast(successMessage, "success"); }
-  catch (error) { toast(error.message || "Yadda saxlama xətası", "error"); }
+async function persistAndRender(successMessage='Stok yeniləndi') {
+  saving=true;
+  try {const ok=await window.StockState.save(state);if(!ok)throw new Error('Dəyişiklik saxlanmadı. Aşağıdakı saxlama bildirişinə baxın.');confirmedState=structuredClone(state);render();toast(successMessage,'success');}
+  catch(error){state=structuredClone(confirmedState);render();toast(error.message,'error');}
+  finally{saving=false;}
 }
 async function askSaleCount(item) {
   if (window.StockPilotUI?.promptNumber) return window.StockPilotUI.promptNumber({ title: "Satış əlavə et", label: `Stokda ${remaining(item)} ədəd var. Neçə ədəd satıldı?`, min: 1, max: remaining(item), value: 1, confirmText: "Satışı əlavə et" });
@@ -62,7 +64,7 @@ function render() {
   };
   const low = entries.filter(({ item }) => remaining(item) <= Number(item.minStock || 0));
   const favourite = entries.filter(({ item }) => item.favorite);
-  document.getElementById("inventoryStats").innerHTML = `<article class="card"><span>Aktiv stok</span><b>${entries.reduce((sum, { item }) => sum + remaining(item), 0)} ədəd</b></article><article class="card"><span>Az qalan məhsul</span><b class="danger-value">${low.length}</b></article><article class="card"><span>Favorilər</span><b>${favourite.length}</b></article><article class="card"><span>Stokun alış dəyəri</span><b>${money(entries.reduce((sum, { item }) => sum + remaining(item) * Number(item.price || 0), 0))}</b></article>`;
+  document.getElementById("inventoryStats").innerHTML = `<article class="card"><span>Aktiv stok</span><b>${entries.reduce((sum, { item }) => sum + remaining(item), 0)} ədəd</b></article><article class="card"><span>Az qalan məhsul</span><b class="danger-value">${low.length}</b></article><article class="card"><span>Favorilər</span><b>${favourite.length}</b></article><article class="card"><span>Stokun alış dəyəri</span><b>${money(entries.reduce((sum, { item }) => sum + remaining(item) * StockDomain.unitCost(item,state), 0))}</b></article>`;
   const shown = entries.filter(({ item, order }) => (!search || `${item.name || ""} ${order.name || ""}`.toLowerCase().includes(search)) && (!lowOnly || remaining(item) <= Number(item.minStock || 0)) && (healthFilter === "all" || healthOf(item) === healthFilter));
   document.getElementById("inventory").innerHTML = shown.length ? shown.map(({ order, item, index }) => {
     const isLow = remaining(item) <= Number(item.minStock || 0);
@@ -73,29 +75,33 @@ function render() {
   }).join("") : `<div class="card empty-state">${search || lowOnly ? "Filterə uyğun stok məhsulu yoxdur." : "Aktiv stokda məhsul yoxdur."}</div>`;
   document.querySelectorAll("[data-plus],[data-minus],[data-sold]").forEach((button) => {
     button.onclick = async () => {
+      if(saving)return;
+      if(window.StockState.isDirty())return toast("Saxlanmamış dəyişiklik var. Saxlayıb səhifəni yeniləyin.","error");
       const ref = button.dataset.plus || button.dataset.minus || button.dataset.sold;
       const splitAt = ref.lastIndexOf(":");
       const orderId = ref.slice(0, splitAt), index = Number(ref.slice(splitAt + 1));
       const order = state.orders.find((entry) => entry.id === orderId);
       const item = order?.items?.[index];
       if (!item) return toast("Məhsul tapılmadı. Səhifəni yeniləyin.", "error");
-      if (button.dataset.plus) { item.qty = remaining(item) + 1; item.acquiredQty = acquired(item) + 1; return persistAndRender(); }
+      if (button.dataset.plus) { const original=acquired(item);item.qty = remaining(item) + 1; item.acquiredQty = original + 1;item.sold=false; return persistAndRender(); }
       if (button.dataset.minus) {
         if (remaining(item) <= 1) return toast("Son məhsulu azaltmaq əvəzinə satış kimi qeyd edin.", "info");
         item.qty = remaining(item) - 1; return persistAndRender();
       }
       const count = await askSaleCount(item);
       if (count == null) return;
-      if (!Number.isFinite(Number(count)) || Number(count) <= 0 || Number(count) > remaining(item)) return toast(`1–${remaining(item)} arası say daxil edin.`, "error");
+      if (!Number.isInteger(Number(count)) || Number(count) <= 0 || Number(count) > remaining(item)) return toast(`1–${remaining(item)} arası say daxil edin.`, "error");
       addSale(item, Number(count)); return persistAndRender("Satış əlavə edildi");
     };
   });
 }
 async function boot() {
   const [me, saved] = await Promise.all([api("/api/me"), api("/api/state")]);
-  if (!me.ok || !saved.ok) return logout();
+  if(me.status===401){location.href="index.html";return;}
+  if(!me.ok||!saved.ok)throw new Error("Məlumat yüklənmədi. Səhifəni yeniləyin.");
   user = (await me.json()).user;
-  state = (await saved.json()).state || { orders: [] };
+  const snapshot=await saved.json();state=snapshot.state;
+  window.StockState.init(snapshot.version,user.id);confirmedState=structuredClone(state);
   if (!Array.isArray(state.orders)) state.orders = [];
   paintUser(); render();
   document.getElementById("search").oninput = render;
@@ -107,4 +113,4 @@ async function boot() {
   });
   document.getElementById("logout").onclick = logout;
 }
-boot().catch(() => logout());
+boot().catch(error=>window.StockState.status(error.message||"Məlumat yüklənmədi.",true));
