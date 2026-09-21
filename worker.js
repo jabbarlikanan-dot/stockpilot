@@ -48,7 +48,7 @@ const constantTimeEqual = (a, b) => {
   for (let i = 0; i < n; i++) diff |= (aa[i] || 0) ^ (bb[i] || 0);
   return diff === 0;
 };
-const APP_VERSION = '44.0.0';
+const APP_VERSION = '45.0.0';
 const PASSWORD_ITERATIONS = 210000;
 const LEGACY_PASSWORD_ITERATIONS = 100000;
 const PIN_HASH_VERSION = 'v3';

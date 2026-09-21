@@ -432,24 +432,9 @@ function compactImage(file) {
   });
 }
 function tabs() {
-  $("tabs").innerHTML =
-    sortedOrders()
-      .map(
-        (o) =>
-          `<button class="tab ${o.id === state.active ? "active" : ""}" data-id="${o.id}">${esc(o.name)}</button>`,
-      )
-      .join("") + '<button id="newOrder" class="plus">+</button>';
-  document.querySelectorAll(".tab").forEach(
-    (b) =>
-      (b.onclick = () => {
-        editing=null;pendingImage="";
-        state.active = b.dataset.id;
-        editing = null;
-        save();
-        render();
-      }),
-  );
-  $("newOrder").onclick = newOrder;
+  const list=sortedOrders();
+  $('tabs').innerHTML=`<label class="order-switch"><span>Alış siyahısı</span><select id="orderPicker" aria-label="Alış siyahısını seç">${list.map(o=>`<option value="${esc(o.id)}" ${o.id===state.active?'selected':''}>${esc(o.name)} · ${(o.items||[]).length} məhsul</option>`).join('')}</select></label><span class="order-switch-count">${list.length} ${state.ui.showArchived?'arxiv':'aktiv'} siyahı</span>`;
+  $('orderPicker').onchange=event=>{editing=null;pendingImage='';state.ui.productFormOpen=false;state.active=event.target.value;render();};
 }
 function productDetail(item) {
   const x = calc(item), sold = soldSummary(item), left = remainingQty(item);
@@ -512,32 +497,32 @@ function collapsePanel(panel, id, title, info, opened) {
     if (id === "orderDetails") state.ui.orderDetailsOpen = disclosure.open;
     if (id === "filterDetails") state.ui.filtersOpen = disclosure.open;
     if (id === "productForm") state.ui.productFormOpen = disclosure.open;
-    save();
   };
 }
 function compactPanels(order) {
-  collapsePanel(
-    document.querySelector(".orderbar"),
-    "orderDetails",
-    "Sifariş məlumatları",
-    `${esc(order.name)} · ${dateTime(order.createdAt)}`,
-    state.ui.orderDetailsOpen,
-  );
-  const activeFilter = state.ui.search || state.ui.status !== "all";
-  collapsePanel(
-    document.querySelector(".tools"),
-    "filterDetails",
-    "Axtarış və filterlər",
-    activeFilter ? "Filter aktivdir" : "Məhsulları tap və sırala",
-    state.ui.filtersOpen,
-  );
-  collapsePanel(
-    document.querySelector(".workspace .form"),
-    "productForm",
-    editing !== null ? "Məhsulu redaktə et" : "Məhsul əlavə et",
-    editing !== null ? "Dəyişikliklər üçün aç" : "Yeni məhsul əlavə etmək üçün aç",
-    editing !== null || !order.items?.length || state.ui.productFormOpen,
-  );
+  const root=$('content');
+  const title=document.createElement('header');title.className='workspace-title';
+  title.innerHTML=`<div><p class="eyebrow">SEÇİLMİŞ ALIŞ SİYAHISI</p><h2>${esc(order.name)}</h2><p>${order.items.length} məhsul növü · ${dateTime(order.createdAt)}</p></div><div class="workspace-actions"><button id="editOrderDetails" class="secondary">Siyahı ayarları</button><button id="openProductEditor" class="primary">+ Məhsul əlavə et</button></div>`;
+  root.prepend(title);
+  const details=document.querySelector('.orderbar');
+  collapsePanel(details,'orderDetails','Siyahı ayarları','Ad, büdcə və əlavə əməliyyatlar',state.ui.orderDetailsOpen);
+  $('editOrderDetails').onclick=()=>{const d=$('orderDetails');d.open=!d.open;if(d.open)d.scrollIntoView({block:'nearest',behavior:'smooth'});};
+  const metrics=root.querySelector('.metrics');if(metrics)title.after(metrics);
+  const toolbar=root.querySelector('.tools');toolbar.classList.add('workspace-toolbar');
+  toolbar.querySelector('small')?.remove();
+  $('search').type='search';$('search').setAttribute('aria-label','Məhsul axtar');
+  $('statusFilter').setAttribute('aria-label','Məhsul statusu');$('orderSort').setAttribute('aria-label','Siyahıları sırala');
+  const reset=document.createElement('button');reset.className='secondary';reset.textContent='Sıfırla';reset.hidden=!state.ui.search&&state.ui.status==='all';reset.onclick=()=>{state.ui.search='';state.ui.status='all';render();};toolbar.append(reset);
+  const panel=root.querySelector('.workspace .form');
+  const drawer=document.createElement('dialog');drawer.id='productEditor';drawer.className='product-editor';drawer.setAttribute('aria-labelledby','productEditorTitle');
+  const head=document.createElement('header');head.className='editor-heading';head.innerHTML=`<div><p class="eyebrow">${esc(order.name)}</p><h2 id="productEditorTitle">${editing!==null?'Məhsulu redaktə et':'Yeni məhsul'}</h2></div><button type="button" class="secondary" id="closeProductEditor" aria-label="Paneli bağla">×</button>`;
+  panel.querySelector('h2')?.remove();drawer.append(head,panel);root.append(drawer);
+  const close=()=>{drawer.close();state.ui.productFormOpen=false;editing=null;pendingImage='';render();requestAnimationFrame(()=>$('openProductEditor')?.focus());};
+  $('closeProductEditor').onclick=close;drawer.addEventListener('cancel',event=>{event.preventDefault();close();});
+  $('openProductEditor').onclick=()=>{state.ui.productFormOpen=true;drawer.showModal();$('name').focus();};
+  if(editing!==null||state.ui.productFormOpen)requestAnimationFrame(()=>{if(drawer.isConnected&&!drawer.open){drawer.showModal();$('name').focus();}});
+  const labels=['Şəkil','Məhsul','Qalan say','Ümumi alış','Satış','Qazanc','Əməliyyat'];
+  root.querySelectorAll('.items tbody tr').forEach(row=>Array.from(row.cells).forEach((cell,n)=>{cell.dataset.label=labels[n];}));
 }
 function renderOperationsHub() {
   const root = document.getElementById("operationsHub");
@@ -559,18 +544,21 @@ function renderOperationsHub() {
 }
 
 function renderCustomerPanel() {
+  const customerQuery=String(state.ui.customerSearch||"").toLocaleLowerCase("az");
+  const matches=order=>!customerQuery||`${order.customer?.name||""} ${order.customer?.phone||""} ${order.id||""}`.toLocaleLowerCase("az").includes(customerQuery);
   const counts = Object.fromEntries(
     Object.keys(customerStatus).map((status) => [status, state.customerOrders.filter((order) => order.status === status).length]),
   );
-  const shown = state.ui.customerView === "all" ? state.customerOrders : state.customerOrders.filter((order) => order.status === state.ui.customerView);
+  const shown = state.customerOrders.filter(order=>(state.ui.customerView === "all" || order.status===state.ui.customerView)&&matches(order));
   const filterButton = (value, label, count) => `<button class="${state.ui.customerView === value ? "primary" : "secondary"}" data-customer-filter="${value}">${label} (${count})</button>`;
   const boardStatuses = ["new", "confirmed", "preparing", "courier"];
   const board = `<div class="customer-board">${boardStatuses.map((status) => {
-    const list = state.customerOrders.filter((order) => order.status === status);
-    return `<section class="customer-column"><div class="customer-column-head"><b>${customerStatus[status]}</b><span>${list.length}</span></div>${list.length ? list.map((order) => customerOrderCard(order, true)).join("") : '<p class="hint">Boşdur</p>'}</section>`;
+    const list = state.customerOrders.filter((order) => order.status === status && matches(order));
+    return `<section class="customer-column"><div class="customer-column-head"><b>${customerStatus[status]}</b><span>${list.length}</span></div>${list.length ? list.map((order) => customerOrderCard(order, true)).join("") : '<p class="column-empty">Bu mərhələdə sifariş yoxdur</p>'}</section>`;
   }).join("")}</div>`;
   const list = `<div class="customer-list-wrap">${shown.length ? shown.map((order) => customerOrderCard(order)).join("") : '<p class="hint">Bu filtr üçün sifariş yoxdur.</p>'}</div>`;
-  $("content").innerHTML = `<section class="box customer-orders customer-panel"><div class="customer-heading"><div><h2>Müştəri sifarişləri</h2><p>${state.customerOrders.length} ümumi sifariş · statusları bir kliklə irəli apar.</p></div><div class="customer-actions"><div class="customer-view-switch"><button class="${state.ui.customerLayout === "board" ? "primary" : "secondary"}" data-customer-layout="board">Board</button><button class="${state.ui.customerLayout === "list" ? "primary" : "secondary"}" data-customer-layout="list">Siyahı</button></div><button id="refreshCustomerOrders" class="secondary">Yenilə</button><button id="customerHistory" class="secondary">Tarixçə</button></div></div><div class="customer-filters">${filterButton("all", "Hamısı", state.customerOrders.length)}${filterButton("new", "Yeni", counts.new)}${filterButton("confirmed", "Təsdiqləndi", counts.confirmed)}${filterButton("preparing", "Hazırlanır", counts.preparing)}${filterButton("courier", "Kuryerdə", counts.courier)}${filterButton("delivered", "Tamamlandı", counts.delivered)}${filterButton("cancelled", "Ləğv edildi", counts.cancelled)}</div>${state.ui.customerLayout === "board" && state.ui.customerView === "all" ? board : list}</section>`;
+  $("content").innerHTML = `<section class="box customer-orders customer-panel"><div class="customer-heading"><div><h2>Müştəri sifarişləri</h2><p>${state.customerOrders.length} ümumi sifariş · statusları bir kliklə irəli apar.</p></div><div class="customer-actions"><div class="customer-view-switch"><button class="${state.ui.customerLayout === "board" ? "primary" : "secondary"}" data-customer-layout="board">Kanban</button><button class="${state.ui.customerLayout === "list" ? "primary" : "secondary"}" data-customer-layout="list">Siyahı</button></div><button id="refreshCustomerOrders" class="secondary">Yenilə</button><button id="customerHistory" class="secondary">Tarixçə</button></div></div><div class="customer-search"><label for="customerSearch">Müştərini və ya sifarişi tap</label><input id="customerSearch" type="search" value="${esc(state.ui.customerSearch||'')}" placeholder="Ad, telefon və ya sifariş nömrəsi…"></div><div class="customer-filters">${filterButton("all", "Hamısı", state.customerOrders.length)}${filterButton("new", "Yeni", counts.new)}${filterButton("confirmed", "Təsdiqləndi", counts.confirmed)}${filterButton("preparing", "Hazırlanır", counts.preparing)}${filterButton("courier", "Kuryerdə", counts.courier)}${filterButton("delivered", "Tamamlandı", counts.delivered)}${filterButton("cancelled", "Ləğv edildi", counts.cancelled)}</div>${state.ui.customerLayout === "board" && state.ui.customerView === "all" ? board : list}</section>`;
+  $("customerSearch").oninput=event=>{state.ui.customerSearch=event.target.value;renderCustomerPanel();$("customerSearch").focus();};
   if (location.hash.startsWith("#order-")) requestAnimationFrame(() => document.getElementById(location.hash.slice(1))?.scrollIntoView({ behavior: "smooth", block: "center" }));
   if ($("customerHistory")) $("customerHistory").onclick = customerHistory;
   if ($("refreshCustomerOrders")) $("refreshCustomerOrders").onclick = async () => { try { await refreshCustomerOrders(); render(); } catch { notify("Sifarişlər yenilənmədi. Giriş sessiyasını yeniləyin."); } };
@@ -629,7 +617,7 @@ function render() {
               const isLow = left > 0 && left <= (+i.minStock || 3);
               const statusClass = left === 0 ? "sold" : isLow ? "low" : "ok";
               const statusLabel = left === 0 ? "Hamısı satılıb" : isLow ? "Stok azalır" : "Stok normaldır";
-              return `<tr><td>${im}</td><td class="product-cell"><button class="fav ${i.favorite ? "active" : ""}" data-fav="${n}" title="Favorit">★</button><button class="product-link" data-detail="${n}"><b>${esc(i.name)}</b></button><span class="product-subline"><span class="row-status ${statusClass}" title="${statusLabel}" aria-label="${statusLabel}"><i></i></span><small>${esc(i.category || "Digər")} · ${x.c.name}</small></span></td><td class="num"><b>${left}</b><br><small>${soldCount} satılıb</small></td><td class="num">${money(x.purchase)} ₼</td><td class="num">${money(sold.sales)} ₼</td><td class="num lime">${money(sold.profit)} ₼</td><td><div class="table-actions">${left ? `<button class="sold table-sale" data-sold="${n}" title="Satış əlavə et">+ Satış</button>` : ""}${soldCount ? `<button class="undo-sale" data-undo-sale="${n}" title="Son satışı geri al">↶</button>` : ""}<button class="edit" data-edit="${n}" title="Redaktə et">Düzəlt</button><button class="remove" data-remove="${n}" title="Sil">Sil</button></div></td></tr>`;
+              return `<tr><td>${im}</td><td class="product-cell"><button class="fav ${i.favorite ? "active" : ""}" data-fav="${n}" title="Favorit">★</button><button class="product-link" data-detail="${n}"><b>${esc(i.name)}</b></button><span class="product-subline"><span class="row-status ${statusClass}" title="${statusLabel}" aria-label="${statusLabel}"><i></i></span><small>${esc(i.category || "Digər")} · ${x.c.name}</small></span></td><td class="num"><b>${left}</b><br><small>${soldCount} satılıb</small></td><td class="num">${money(x.purchase)} ₼</td><td class="num">${money(sold.sales)} ₼</td><td class="num lime">${money(sold.profit)} ₼</td><td><div class="table-actions">${left ? `<button class="sold table-sale" data-sold="${n}" title="Satış əlavə et">+ Satış</button>` : ""}${soldCount ? `<button class="undo-sale" data-undo-sale="${n}" title="Son satışı geri al" aria-label="Son satışı geri al">↶</button>` : ""}<button class="edit" data-edit="${n}" title="Redaktə et">Düzəlt</button><button class="remove" data-remove="${n}" title="Sil">Sil</button></div></td></tr>`;
             })
             .join("")
         : '<tr><td colspan="7" class="empty">Bu filterdə məhsul yoxdur.</td></tr>'
@@ -655,7 +643,8 @@ function bind(o, e) {
   };
   $("search").oninput = (v) => {
     state.ui.search = v.target.value;
-    render();
+    const caret=v.target.selectionStart;render();
+    $("search").focus();try{$("search").setSelectionRange(caret,caret);}catch{}
   };
   $("statusFilter").onchange = (v) => {
     state.ui.status = v.target.value;
@@ -697,6 +686,7 @@ function bind(o, e) {
     $("cancelEdit").onclick = () => {
       editing = null;
       pendingImage = "";
+      state.ui.productFormOpen=false;
       render();
     };
   $("saveItem").onclick = () => {
@@ -731,6 +721,7 @@ function bind(o, e) {
     else o.items.push(i);
     editing = null;
     pendingImage = "";
+    state.ui.productFormOpen=false;
     save();
     render();
   };
