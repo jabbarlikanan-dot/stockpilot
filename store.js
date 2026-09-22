@@ -63,9 +63,9 @@ function render() {
   $("products").innerHTML = (visible.map((product) => `
     <article class="product">
       <div class="product-media">${safeImg(product.image) ? `<img src="${esc(safeImg(product.image))}" alt="${esc(product.name)}" loading="lazy" decoding="async">` : '<div class="placeholder">Şəkil yoxdur</div>'}</div>
-      <div class="product-meta"><small>${esc(product.category || "Digər")}</small></div>
+      <div class="product-meta"><small>${esc(product.category || "Digər")}</small><span class="product-number">${String(visible.indexOf(product)+1).padStart(2,"0")}</span></div>
       <h2>${esc(product.name)}</h2>
-      <footer><span class="price">${money(product.price)}</span><button data-add="${esc(product.id)}">Səbətə əlavə et</button></footer>
+      <footer><span class="price">${money(product.price)}</span><button data-add="${esc(product.id)}">Səbətə əlavə et <span aria-hidden="true">+</span></button></footer>
     </article>`).join("") || '<p class="cart-empty">Bu axtarışa uyğun məhsul tapılmadı.</p>')
     + (shown.length > visible.length ? `<button id="loadMore" class="load-more">Daha çox məhsul göstər (${shown.length - visible.length})</button>` : "");
 

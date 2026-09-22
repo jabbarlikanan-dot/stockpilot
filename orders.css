@@ -1,3 +1,4 @@
+@layer stockpilot-legacy {
 :root {
   --lime: #c6d92c;
   --bg: #090b08;
@@ -541,7 +542,7 @@ select:focus {
   padding: 18px;
 }
 .hidden {
-  display: none !important;
+  display: none ;
 }
 .modal,
 .auth-card {
@@ -1041,8 +1042,8 @@ select:focus {
   *,
   *::before,
   *::after {
-    animation-duration: 0.01ms !important;
-    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms ;
+    transition-duration: 0.01ms ;
   }
 }
 @media (max-width: 760px) {
@@ -1085,3 +1086,7 @@ select:focus {
   .heading-actions > * { flex:1; }
   .modal { width:min(100%, 520px); max-height:calc(100dvh - 24px); border-radius:14px; }
 }
+
+}
+
+.hidden, [hidden] { display: none !important; }

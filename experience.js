@@ -13,7 +13,7 @@
         if(before){const label=document.createElement('span');label.className='ux-nav-label';label.textContent=title;nav.insertBefore(label,before);}
       }
     }
-    const host=document.querySelector('.topbar-actions,.top>div');
+    let host=document.querySelector('.topbar-actions');if(!host){const top=document.querySelector('.top');if(top){host=document.createElement('div');host.className='ux-top-actions';top.append(host);}}
     if(host&&['dashboard','inventory'].includes(path)){
       const button=document.createElement('button');button.className='secondary ux-density';button.type='button';
       const paint=()=>{const compact=document.documentElement.dataset.density==='compact';button.textContent=compact?'Rahat görünüş':'Yığcam görünüş';button.setAttribute('aria-pressed',String(compact));};

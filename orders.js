@@ -522,7 +522,18 @@ function compactPanels(order) {
   $('openProductEditor').onclick=()=>{state.ui.productFormOpen=true;drawer.showModal();$('name').focus();};
   if(editing!==null||state.ui.productFormOpen)requestAnimationFrame(()=>{if(drawer.isConnected&&!drawer.open){drawer.showModal();$('name').focus();}});
   const labels=['Şəkil','Məhsul','Qalan say','Ümumi alış','Satış','Qazanc','Əməliyyat'];
-  root.querySelectorAll('.items tbody tr').forEach(row=>Array.from(row.cells).forEach((cell,n)=>{cell.dataset.label=labels[n];}));
+  const grid=document.createElement('div');grid.className='purchase-grid';grid.setAttribute('aria-label','Alış siyahısının məhsulları');
+  root.querySelectorAll('.items tbody tr').forEach(row=>{
+    const cells=Array.from(row.cells);const card=document.createElement('article');card.className='purchase-card';
+    if(cells.length===1){card.className='catalog-empty';card.textContent='Uyğun məhsul yoxdur. Filtri dəyiş və ya yeni məhsul əlavə et.';grid.append(card);return;}
+    cells.forEach((cell,n)=>{
+      const block=document.createElement(n===6?'footer':'div');block.className=['purchase-media','purchase-name','purchase-quantity','purchase-value','purchase-value','purchase-value profit','purchase-actions'][n];
+      if(n>=2&&n<=5){const label=document.createElement('span');label.className='purchase-label';label.textContent=labels[n];block.append(label);const value=document.createElement('div');value.append(...cell.childNodes);block.append(value);}else block.append(...cell.childNodes);
+      card.append(block);
+    });grid.append(card);
+  });
+  root.querySelector('.tablebox').replaceWith(grid);
+  panel.querySelectorAll('.field').forEach(field=>{const label=field.querySelector('label'),input=field.querySelector('input,select');if(label&&input?.id)label.htmlFor=input.id;});
 }
 function renderOperationsHub() {
   const root = document.getElementById("operationsHub");

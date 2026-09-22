@@ -1,3 +1,4 @@
+@layer stockpilot-legacy {
 /* StockPilot üçün bütün daxili səhifələrdə ortaq, yüngül naviqasiya qabığı */
 :root {
   --sidebar-width: 244px;
@@ -146,7 +147,7 @@
 .notification-page-head { display: flex; align-items: end; justify-content: space-between; gap: 16px; }
 .notification-page-head h1 { margin: 2px 0; font-size: clamp(28px, 4vw, 42px); }
 .notification-page-head p { margin: 0; color: #9ca895; }
-.eyebrow { color: #c6d92c !important; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
+.eyebrow { color: #c6d92c ; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .08em; }
 .notification-page-list { display: grid; gap: 8px; }
 .notification-page-list .notification-item { padding: 14px; border-color: #303a29; }
 .notification-page-list .notification-item small { font-size: 13px; }
@@ -164,7 +165,7 @@
   .app-shell,
   .app-shell.is-sidebar-compact { display: block; }
   .app-sidebar { display: none; }
-  .app-main { padding-bottom: 82px !important; }
+  .app-main { padding-bottom: 82px ; }
   .mobile-bottom { position: fixed; z-index: 50; right: 0; bottom: 0; left: 0; display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 4px; padding: 8px 7px calc(8px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line, #303a29); background: #10140efd; }
   .mobile-bottom a { display: grid; min-height: 46px; grid-template-rows: 18px auto; place-items: center; gap: 3px; border-radius: 9px; color: var(--muted, #9ca895); font-size: 10px; font-weight: 800; line-height: 1; text-align: center; text-decoration: none; }
   .mobile-bottom svg { width: 17px; height: 17px; }
@@ -182,7 +183,7 @@
 /* UX utilities */
 :focus-visible { outline: 3px solid color-mix(in srgb, var(--lime, #c6d92c) 60%, transparent); outline-offset: 2px; }
 button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
-button:disabled, [aria-disabled="true"] { cursor: not-allowed !important; opacity: .58; transform: none !important; }
+button:disabled, [aria-disabled="true"] { cursor: not-allowed ; opacity: .58; transform: none ; }
 .is-offline .app-main::before { content: "Offline"; position: fixed; z-index: 100; top: 8px; left: 50%; transform: translateX(-50%); padding: 5px 10px; border: 1px solid #7b493d; border-radius: 999px; background: #2b1814; color: #ffb09d; font-size: 11px; font-weight: 900; box-shadow: 0 8px 24px #0007; }
 .sp-toast-host { position: fixed; z-index: 200; right: 16px; bottom: 18px; display: grid; gap: 8px; width: min(360px, calc(100vw - 32px)); pointer-events: none; }
 .sp-toast { opacity: 0; transform: translateY(10px); padding: 12px 14px; border: 1px solid #425036; border-radius: 12px; background: #151c12; color: #f4f7ee; box-shadow: 0 18px 48px #0009; font-size: 13px; font-weight: 750; transition: 180ms ease; }
@@ -208,8 +209,8 @@ button:disabled, [aria-disabled="true"] { cursor: not-allowed !important; opacit
 .mobile-drawer { display:none; }
 
 @media (max-width:760px){
-  .topbar,.top{display:none!important}
-  .app-main{padding-top:74px!important;padding-bottom:92px!important}
+  .topbar,.top{display:none}
+  .app-main{padding-top:74px;padding-bottom:92px}
 
   .mobile-topbar{
     position:fixed;
@@ -279,9 +280,9 @@ button:disabled, [aria-disabled="true"] { cursor: not-allowed !important; opacit
   .mobile-drawer-footer{margin-top:auto;padding-top:14px;border-top:1px solid #252d20}
 
   .mobile-bottom{
-    grid-template-columns:repeat(5,minmax(0,1fr))!important;
-    gap:3px!important;
-    padding:7px 6px calc(7px + env(safe-area-inset-bottom))!important;
+    grid-template-columns:repeat(5,minmax(0,1fr));
+    gap:3px;
+    padding:7px 6px calc(7px + env(safe-area-inset-bottom));
   }
   .mobile-bottom a,.mobile-bottom button{
     display:grid;min-width:0;min-height:56px;grid-template-rows:20px auto;place-items:center;gap:4px;
@@ -294,7 +295,11 @@ button:disabled, [aria-disabled="true"] { cursor: not-allowed !important; opacit
   .mobile-bottom .mobile-primary-action svg{stroke:#11160c}
   .mobile-bottom span{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 
-  .heading{padding-top:18px!important}
-  .heading h1{font-size:clamp(28px,9vw,38px)!important;letter-spacing:-1.2px!important}
-  .heading p{font-size:14px!important}
+  .heading{padding-top:18px}
+  .heading h1{font-size:clamp(28px,9vw,38px);letter-spacing:-1.2px}
+  .heading p{font-size:14px}
 }
+
+}
+
+.hidden, [hidden] { display: none !important; }
